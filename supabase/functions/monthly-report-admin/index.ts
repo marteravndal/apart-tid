@@ -1,0 +1,33 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
+
+const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS","Content-Type":"application/json"};
+const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:cors});
+const emailPattern=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const categories=[{key:"overtime_40_hours",category:"overtime_40",fallback:"Overtidstillegg 40 %"},{key:"ordinary_hours",category:"ordinary",fallback:"Timelønn"},{key:"sick_pay_hours",category:"sick_pay",fallback:"Sykepenger"},{key:"overtime_100_hours",category:"overtime_100",fallback:"Overtidstillegg 100 %"}];
+const quote=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
+const amount=(value:unknown)=>Number(value||0).toFixed(2).replace(".",",");
+
+Deno.serve(async(req:Request)=>{
+  if(req.method==="OPTIONS")return new Response("ok",{headers:cors});if(req.method!=="POST")return json({error:"Handling støttes ikke."},405);
+  const auth=req.headers.get("Authorization");if(!auth?.startsWith("Bearer "))return json({error:"Mangler innlogging."},401);
+  const admin=createClient(Deno.env.get("SUPABASE_URL")!,Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,{auth:{persistSession:false}}),{data:authData,error:authError}=await admin.auth.getUser(auth.slice(7));if(authError||!authData.user)return json({error:"Ugyldig innlogging."},401);
+  const {data:me}=await admin.from("employees").select("id,organization_id,role,active").eq("auth_user_id",authData.user.id).maybeSingle();if(!me?.active||me.role!=="admin")return json({error:"Kun administrator har tilgang."},403);
+  let body:Record<string,unknown>;try{body=await req.json()}catch{return json({error:"Ugyldig forespørsel."},400)}const action=String(body.action||"load");
+  if(action==="save_accountant"){
+    const email=String(body.email||"").trim().toLowerCase();if(!emailPattern.test(email))return json({error:"Skriv inn en gyldig e-postadresse."},400);const {data:existing}=await admin.from("report_recipients").select("id").eq("organization_id",me.organization_id).eq("recipient_type","accountant").limit(1).maybeSingle();const result=existing?await admin.from("report_recipients").update({email,created_by:authData.user.id}).eq("id",existing.id):await admin.from("report_recipients").insert({organization_id:me.organization_id,email,recipient_type:"accountant",created_by:authData.user.id});if(result.error)return json({error:result.error.message},400);await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"save_report_accountant",entity_type:"report_recipient",details:{email}});return json({ok:true});
+  }
+  if(action==="remove_accountant"){
+    const {data:existing}=await admin.from("report_recipients").select("id,email").eq("organization_id",me.organization_id).eq("recipient_type","accountant").limit(1).maybeSingle();if(existing){const result=await admin.from("report_recipients").delete().eq("organization_id",me.organization_id).eq("recipient_type","accountant");if(result.error)return json({error:result.error.message},400);await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"remove_report_accountant",entity_type:"report_recipient",entity_id:existing.id,details:{email:existing.email}})}return json({ok:true});
+  }
+  if(action!=="load"&&action!=="send")return json({error:"Ukjent handling."},400);const month=String(body.month||"");if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return json({error:"Velg en gyldig måned."},400);
+  const monthStart=`${month}-01`,[{data:lock,error:lockError},{data:recipients,error:recipientError}]=await Promise.all([admin.from("month_locks").select("id,month_start,revision,locked_at").eq("organization_id",me.organization_id).eq("month_start",monthStart).is("superseded_at",null).maybeSingle(),admin.from("report_recipients").select("id,email,recipient_type").eq("organization_id",me.organization_id).order("recipient_type")]);if(lockError||recipientError)return json({error:lockError?.message||recipientError?.message},400);
+  if(!lock)return json({month,locked:false,recipients:recipients||[],rows:[]});const {data:rows,error:rowsError}=await admin.from("month_snapshot_rows").select("employee_number,employee_name,ordinary_hours,overtime_40_hours,overtime_100_hours,sick_pay_hours,payroll_codes").eq("lock_id",lock.id).order("employee_number");if(rowsError)return json({error:rowsError.message},400);
+  if(action==="send"){
+    const resendKey=Deno.env.get("RESEND_API_KEY");if(!resendKey)return json({error:"E-postutsending mangler servernøkkel for Resend."},503);const recipientEmails=(recipients||[]).map(r=>r.email);if(!recipientEmails.length)return json({error:"Ingen rapportmottakere er registrert."},409);
+    const reportLines=(rows||[]).flatMap(row=>{const values=row as Record<string,unknown>;return categories.filter(item=>Number(values[item.key]||0)!==0).map(item=>{const setting=(row.payroll_codes as Record<string,{code?:string;label?:string}>|null)?.[item.category]||{};return[row.employee_number,row.employee_name,setting.code||"",setting.label||item.fallback,amount(values[item.key])] })});
+    const csv="\ufeff"+[["Ansattnummer","Navn","Lønnsart-ID","Lønnsart","Antall"],...reportLines].map(row=>row.map(quote).join(";")).join("\r\n"),bytes=new TextEncoder().encode(csv);let binary="";for(const byte of bytes)binary+=String.fromCharCode(byte);
+    const response=await fetch("https://api.resend.com/emails",{method:"POST",headers:{Authorization:`Bearer ${resendKey}`,"Content-Type":"application/json","Idempotency-Key":`apart-payroll-${lock.id}-${recipientEmails.sort().join("-")}`},body:JSON.stringify({from:"Apart Tid <post@apartstavanger.no>",to:recipientEmails,subject:`Lønnsrapport Apart Tid ${month}`,html:`<h2>Lønnsrapport ${month}</h2><p>Vedlagt ligger låst lønnsrapport fra Apart Tid, revisjon ${lock.revision}.</p><p>Rapporten omfatter ${rows?.length||0} ansatte.</p>`,attachments:[{filename:`apart-lonnsrapport-${month}.csv`,content:btoa(binary)}]})});const result=await response.json().catch(()=>({}));if(!response.ok)return json({error:String(result?.message||"Resend kunne ikke sende rapporten.")},502);await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"send_monthly_payroll_report",entity_type:"month_lock",entity_id:lock.id,details:{month,revision:lock.revision,recipients:recipientEmails,message_id:result.id}});return json({ok:true,id:result.id,recipients:recipientEmails});
+  }
+  return json({month,locked:true,lock,recipients:recipients||[],rows:rows||[]});
+});
