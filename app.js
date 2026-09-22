@@ -222,6 +222,7 @@ function rosterIso(date){return date.toISOString().slice(0,10)}
 function rosterMonday(value=new Date()){const d=value instanceof Date?new Date(value):new Date(`${value}T12:00:00`),day=d.getDay()||7;d.setDate(d.getDate()-day+1);return rosterIso(d)}
 function rosterAddDays(value,days){const d=new Date(`${value}T12:00:00`);d.setDate(d.getDate()+days);return rosterIso(d)}
 function rosterDayLabel(value){return new Date(`${value}T12:00:00`).toLocaleDateString('nb-NO',{weekday:'long',day:'numeric',month:'short'})}
+function rosterDayParts(value){const date=new Date(`${value}T12:00:00`);return{weekday:date.toLocaleDateString('nb-NO',{weekday:'long'}),date:date.toLocaleDateString('nb-NO',{day:'numeric',month:'short'})}}
 function rosterWeekLabel(value){const end=rosterAddDays(value,6),weekNumber=(()=>{const d=new Date(`${value}T12:00:00Z`),start=new Date(Date.UTC(d.getUTCFullYear(),0,4)),startDay=start.getUTCDay()||7,startMonday=new Date(start);startMonday.setUTCDate(start.getUTCDate()-startDay+1);return Math.floor((d-startMonday)/604800000)+1})();return `Uke ${weekNumber} · ${new Date(`${value}T12:00:00`).toLocaleDateString('nb-NO',{day:'numeric',month:'short'})}–${new Date(`${end}T12:00:00`).toLocaleDateString('nb-NO',{day:'numeric',month:'short',year:'numeric'})}`}
 function rosterTime(value){return String(value||'').slice(0,5).replace(':','.')}
 function rosterMinutes(value){const[a,b]=String(value).slice(0,5).split(':').map(Number);return a*60+b}
@@ -252,9 +253,10 @@ function renderAdminRoster(){
   const shiftCard=shift=>{const employee=rosterData.employees.find(e=>e.id===shift.employee_id);return `<article class="roster-shift ${shift.shift_type}" data-roster-shift="${shift.id}"><strong>${escapeHtml(employee?.full_name||'Ansatt')}</strong><span>${rosterTypes[shift.shift_type]} · ${rosterTime(shift.start_time)}–${rosterTime(shift.end_time)}${rosterCrossesMidnight(shift)?' · neste dag':''}</span><div><button class="small" data-roster-edit="${shift.id}">Rediger</button><button class="small roster-delete" data-roster-delete="${shift.id}">Fjern</button></div></article>`};
   week.innerHTML=days.map(date=>{
     const shifts=shiftsByDay.get(date),absences=absencesByDay.get(date);
+    const dayParts=rosterDayParts(date);
     const absenceGroup=absenceRows?`<div class="roster-absence-group">${absences.map(a=>{const employee=rosterData.employees.find(e=>e.id===a.employee_id);return `<div class="roster-absence"><strong>${escapeHtml(employee?.full_name||'Ansatt')}</strong><span>${a.request_type==='vacation'?'Ferie':'Permisjon'}</span></div>`}).join('')}</div>`:'';
     const shiftGroups=shiftTypes.map(type=>`<div class="roster-shift-group ${type}-group" aria-label="${rosterTypes[type]}">${shifts.filter(x=>x.shift_type===type).map(shiftCard).join('')}</div>`).join('');
-    return `<section class="roster-day"><header><strong>${rosterDayLabel(date)}</strong><button class="small" data-roster-add="${date}">+ Vakt</button></header><div class="roster-day-body">${absenceGroup}${shiftGroups}</div></section>`;
+    return `<section class="roster-day"><header><div class="roster-day-date"><strong>${escapeHtml(dayParts.weekday)}</strong><span>${escapeHtml(dayParts.date)}</span></div><button class="small" data-roster-add="${date}">+ Vakt</button></header><div class="roster-day-body">${absenceGroup}${shiftGroups}</div></section>`;
   }).join('');
 
   const totals=new Map();
