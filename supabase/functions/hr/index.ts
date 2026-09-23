@@ -69,7 +69,7 @@ Deno.serve(async(req:Request)=>{
   }
 
   if(req.method==="POST"&&action==="upload_document"){
-    const title=String(body.title||"").trim(),name=String(body.file_name||"").trim(),mime=String(body.mime_type||""),encoded=String(body.content_base64||""),target=String(body.employee_id||""),requiresSignature=Boolean(body.requires_signature);
+    const title=String(body.title||"").trim(),name=String(body.file_name||"").trim(),mime=String(body.mime_type||""),encoded=String(body.content_base64||""),target=String(body.employee_id||""),requiresSignature=Boolean(body.requires_signature),sendNotification=body.send_notification!==false;
     if(title.length<2||!name||mime!=="application/pdf"||!encoded)return json({error:"Velg en PDF-fil, mottaker og navn på dokumentet."},400);if(encoded.length>14000000)return json({error:"Dokumentet er for stort. Maksimum er 10 MB."},400);
     let bytes:Uint8Array;try{bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0))}catch{return json({error:"Dokumentet kunne ikke leses."},400)}if(bytes.length>10485760)return json({error:"Dokumentet er for stort. Maksimum er 10 MB."},400);
     let employeesQuery=admin.from("employees").select("id,full_name,email").eq("organization_id",me.organization_id).eq("active",true);if(target!=="all")employeesQuery=employeesQuery.eq("id",target);
@@ -77,9 +77,9 @@ Deno.serve(async(req:Request)=>{
     const safe=name.replace(/[^a-zA-Z0-9._-]/g,"_").slice(-100),path=`${me.organization_id}/${crypto.randomUUID()}-${safe}`,batchId=crypto.randomUUID();const upload=await admin.storage.from("hr-documents").upload(path,bytes,{contentType:mime,upsert:false});if(upload.error)return json({error:upload.error.message},400);
     const rows=recipients.map((employee:any)=>({organization_id:me.organization_id,employee_id:employee.id,batch_id:batchId,title,document_type:"general",storage_path:path,original_name:name,mime_type:mime,size_bytes:bytes.length,requires_signature:requiresSignature,signature_status:requiresSignature?"pending":"not_required",uploaded_by:authData.user.id}));
     const result=await admin.from("hr_documents").insert(rows).select("id");if(result.error){await admin.storage.from("hr-documents").remove([path]);return json({error:result.error.message},400)}
-    await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"upload_hr_document",entity_type:"hr_document_batch",entity_id:batchId,details:{title,recipient_count:recipients.length,requires_signature:requiresSignature}});
-    const notices=await Promise.all(recipients.map((employee:any)=>sendEmail(employee.email,"Nytt dokument i HR-arkivet",`<h2>Nytt HR-dokument</h2><p>Hei ${esc(employee.full_name)}.</p><p><strong>${esc(title)}</strong> er lagt i HR-arkivet ditt i Apart Tid.</p><p>Logg inn for å lese dokumentet.</p>`)));
-    return json({documents:result.data,recipient_count:recipients.length,email_sent:notices.filter(Boolean).length},201);
+    await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"upload_hr_document",entity_type:"hr_document_batch",entity_id:batchId,details:{title,recipient_count:recipients.length,requires_signature:requiresSignature,send_notification:sendNotification}});
+    const notices=sendNotification?await Promise.all(recipients.map((employee:any)=>sendEmail(employee.email,"Nytt dokument i HR-arkivet",`<h2>Nytt HR-dokument</h2><p>Hei ${esc(employee.full_name)}.</p><p><strong>${esc(title)}</strong> er lagt i HR-arkivet ditt i Apart Tid.</p><p>Logg inn for å lese dokumentet.</p>`))):[];
+    return json({documents:result.data,recipient_count:recipients.length,notification_requested:sendNotification,email_sent:notices.filter(Boolean).length},201);
   }
   if(req.method==="POST"&&action==="create_contract"){
     const employeeId=String(body.employee_id||""),title=String(body.title||"").trim(),modules=cleanModules(body.modules);if(!employeeId||title.length<2||!modules.some(m=>m.active))return json({error:"Velg ansatt og behold minst én aktiv kontraktsmodul."},400);
