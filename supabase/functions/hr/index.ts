@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 
-const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"GET, POST, PATCH, OPTIONS","Content-Type":"application/json"};
+const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"GET, POST, PATCH, DELETE, OPTIONS","Content-Type":"application/json"};
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:cors});
 const esc=(value:unknown)=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
 const sendEmail=async(to:string,subject:string,html:string)=>{const key=Deno.env.get("RESEND_API_KEY");if(!key)return false;try{return (await fetch("https://api.resend.com/emails",{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({from:"Apart Tid <post@apartstavanger.no>",to:[to],subject,html})})).ok}catch{return false}};
@@ -55,6 +55,18 @@ Deno.serve(async(req:Request)=>{
     return json({content_base64,file_name:`${contract.title.replace(/[^a-zA-Z0-9æøåÆØÅ_-]/g,"_")}-v${contract.version}.pdf`});
   }
   if(me.role!=="admin")return json({error:"Kun administrator har tilgang."},403);
+
+  if(req.method==="POST"&&action==="download_document"){
+    const id=String(body.id||"");const {data:document,error:documentError}=await admin.from("hr_documents").select("id,storage_path,original_name").eq("id",id).eq("organization_id",me.organization_id).maybeSingle();if(documentError||!document)return json({error:"Dokumentet finnes ikke."},404);
+    const {data:signed,error:signedError}=await admin.storage.from("hr-documents").createSignedUrl(document.storage_path,120,{download:document.original_name});if(signedError||!signed?.signedUrl)return json({error:"Dokumentet kunne ikke klargjøres for nedlasting."},500);
+    await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"download_hr_document",entity_type:"hr_document",entity_id:id});return json({url:signed.signedUrl,file_name:document.original_name});
+  }
+  if(req.method==="DELETE"&&action==="delete_document"){
+    const id=String(body.id||"");const {data:document,error:documentError}=await admin.from("hr_documents").select("id,employee_id,title,original_name,storage_path").eq("id",id).eq("organization_id",me.organization_id).maybeSingle();if(documentError||!document)return json({error:"Dokumentet finnes ikke."},404);
+    const deleted=await admin.from("hr_documents").delete().eq("id",id).eq("organization_id",me.organization_id).select("id").maybeSingle();if(deleted.error||!deleted.data)return json({error:"Dokumentet kunne ikke slettes."},400);
+    const {data:remaining}=await admin.from("hr_documents").select("id").eq("organization_id",me.organization_id).eq("storage_path",document.storage_path).limit(1);let storageRemoved=false,warning:string|undefined;if(!remaining?.length){const storage=await admin.storage.from("hr-documents").remove([document.storage_path]);storageRemoved=!storage.error;if(storage.error)warning="Dokumentoppføringen er slettet, men filoppryddingen må prøves igjen senere."}
+    await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"delete_hr_document",entity_type:"hr_document",entity_id:id,details:{employee_id:document.employee_id,title:document.title,original_name:document.original_name,storage_removed:storageRemoved}});return json({ok:true,storage_removed:storageRemoved,...(warning?{warning}:{})});
+  }
 
   if(req.method==="POST"&&action==="upload_document"){
     const title=String(body.title||"").trim(),name=String(body.file_name||"").trim(),mime=String(body.mime_type||""),encoded=String(body.content_base64||""),target=String(body.employee_id||""),requiresSignature=Boolean(body.requires_signature);
