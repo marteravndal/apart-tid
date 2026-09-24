@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Apart Tid">
+  <rect width="512" height="512" fill="#12251f"/>
+  <rect x="136" y="136" width="240" height="240" rx="64" fill="#e86d3c"/>
+  <path d="M256 178c-12 0-22 7-27 19l-59 136h47l11-29h57l11 29h47l-59-136c-5-12-16-19-28-19Zm-14 88 14-38 14 38h-28Z" fill="#fffaf4"/>
+</svg>

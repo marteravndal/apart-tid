@@ -4,6 +4,25 @@ const SESSION_KEY='apart-tid-session';
 const $=s=>document.querySelector(s);
 let session=null,currentEmployee=null,employees=[],dailyReports=[],transportProposals=[],approvalData=null,monthOverview=null,payrollReport=null,hmsData={documents:[],deviations:[]},sickLeaveData={requests:[]},vacationData={requests:[],carryovers:[]},hrData={documents:[],contracts:[],employees:[]},courseData={courses:[],assignments:[],employees:[]},employeeHomeData={documents:[],notifications:{}},dashboardData=null,dashboardDate='',rosterData={shifts:[],employees:[],absences:[]},rosterWeekStart='',employeeRosterWeekStart='',courseModules=[],courseQuestions=[],activeCourseAssignment=null,contractModules=[],pendingToggle=null,activeEmployeeArchiveId='',loginEmail='',clockState=null,scannerStream=null,scannerTimer=null;
 
+let deferredInstallPrompt=null,pwaRegistration=null,pwaRefreshing=false;
+const PWA_INSTALL_DISMISSED='apart-tid-pwa-install-dismissed';
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+const isIos=()=>/iphone|ipad|ipod/i.test(navigator.userAgent);
+const installDismissedRecently=()=>Date.now()-Number(localStorage.getItem(PWA_INSTALL_DISMISSED)||0)<12096e5;
+function setNetworkStatus(){$('#networkStatus').classList.toggle('hidden',navigator.onLine)}
+function showInstallOffer(){if(!isStandalone()&&!installDismissedRecently())$('#pwaInstallBar').classList.remove('hidden')}
+function showUpdateOffer(registration){pwaRegistration=registration;$('#pwaInstallBar').classList.add('hidden');$('#pwaUpdateBar').classList.remove('hidden')}
+window.addEventListener('online',setNetworkStatus);window.addEventListener('offline',setNetworkStatus);setNetworkStatus();
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstallPrompt=event;showInstallOffer()});
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;$('#pwaInstallBar').classList.add('hidden');localStorage.removeItem(PWA_INSTALL_DISMISSED)});
+$('#installPwa').onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;$('#pwaInstallBar').classList.add('hidden');return}if(isIos()){$('#pwaInstallBar').classList.add('hidden');$('#installHelpDialog').showModal()}};
+$('#dismissPwaInstall').onclick=()=>{localStorage.setItem(PWA_INSTALL_DISMISSED,String(Date.now()));$('#pwaInstallBar').classList.add('hidden')};
+$('#closeInstallHelp').onclick=()=>$('#installHelpDialog').close();
+$('#dismissPwaUpdate').onclick=()=>$('#pwaUpdateBar').classList.add('hidden');
+$('#updatePwa').onclick=()=>{const worker=pwaRegistration?.waiting;if(worker){pwaRefreshing=true;worker.postMessage({type:'SKIP_WAITING'})}else location.reload()};
+if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{const registration=await navigator.serviceWorker.register('/sw.js',{scope:'/'});pwaRegistration=registration;if(registration.waiting)showUpdateOffer(registration);registration.addEventListener('updatefound',()=>{const worker=registration.installing;if(!worker)return;worker.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)showUpdateOffer(registration)})});navigator.serviceWorker.addEventListener('controllerchange',()=>{if(pwaRefreshing)location.reload()});registration.update().catch(()=>{})}catch(error){console.warn('PWA kunne ikke registreres.',error)}})}
+if(isIos()&&!isStandalone())setTimeout(showInstallOffer,1200);
+
 function show(message){const el=$('#toast');el.textContent=message;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3000)}
 async function request(path,{method='GET',body,token}={}){const response=await fetch(SUPABASE_URL+path,{method,headers:{apikey:API_KEY,'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:body?JSON.stringify(body):undefined});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error_description||data.msg||data.error||'Noe gikk galt. Prøv igjen.');return data}
 function saveSession(value){session=value;value?localStorage.setItem(SESSION_KEY,JSON.stringify(value)):localStorage.removeItem(SESSION_KEY)}
