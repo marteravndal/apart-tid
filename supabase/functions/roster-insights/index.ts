@@ -11,6 +11,6 @@ Deno.serve(async(req:Request)=>{
   const admin=createClient(Deno.env.get("SUPABASE_URL")!,Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,{auth:{persistSession:false}});
   const {data:authData,error:authError}=await admin.auth.getUser(auth.slice(7));if(authError||!authData.user)return json({error:"Ugyldig innlogging."},401);
   const {data:me}=await admin.from("employees").select("organization_id,role,active").eq("auth_user_id",authData.user.id).maybeSingle();if(!me?.active||me.role!=="admin")return json({error:"Kun administrator har tilgang."},403);
-  const {data:employees,error}=await admin.from("employee_private_details").select("employee_id,position_percent,salary_type,salary_rate").eq("organization_id",me.organization_id);if(error)return json({error:error.message},400);
-  return json({employees:employees||[]});
+  const [{data:employees,error},{data:payrollSettings,error:settingsError}]=await Promise.all([admin.from("employee_private_details").select("employee_id,position_percent,salary_type,salary_rate").eq("organization_id",me.organization_id),admin.from("payroll_settings").select("category,payroll_code,label,hourly_rate").eq("organization_id",me.organization_id).in("category",["evening","night","weekend"])]);if(error||settingsError)return json({error:error?.message||settingsError?.message},400);
+  return json({employees:employees||[],payroll_settings:payrollSettings||[]});
 });
