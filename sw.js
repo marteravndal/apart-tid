@@ -1,4 +1,4 @@
-const CACHE_NAME='apart-tid-shell-v4';
+const CACHE_NAME='apart-tid-shell-v5';
 const OFFLINE_URL='/offline';
 const APP_SHELL=[OFFLINE_URL,'/styles.css','/app.js','/manifest.webmanifest','/admin-app','/admin-app.css','/admin-app.js','/admin-manifest.webmanifest','/icons/apart-tid-192.png','/icons/apart-tid-512.png','/icons/apart-tid-maskable-512.png'];
 
