@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#12251f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Apart Admin">
+  <title>Apart Tid ADMIN</title>
+  <meta name="description" content="Mobil bemanningsoversikt for administrator i Apart Tid.">
+  <link rel="manifest" href="/admin-manifest.webmanifest">
+  <link rel="icon" href="/icons/apart-tid-192.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/admin-app.css">
+</head>
+<body class="admin-app-body">
+  <header class="admin-app-topbar">
+    <a class="admin-app-brand" href="/admin-app" aria-label="Apart Tid ADMIN"><span class="mark">A</span><span>Apart Tid <small>ADMIN</small></span></a>
+    <div class="admin-app-head-actions"><a class="admin-app-full-link" href="/">Fullversjon</a><button id="logout" class="ghost hidden">Logg ut</button></div>
+  </header>
+  <div id="networkStatus" class="network-status hidden" role="status">Du er uten nett. Oppdateringer er utilgjengelige.</div>
+  <aside id="pwaInstallBar" class="pwa-prompt hidden" aria-label="Installer Apart Tid ADMIN"><div><strong>Installer ADMIN-appen</strong><span>Åpne bemanningsoversikten direkte fra hjemskjermen.</span></div><div class="actions"><button id="dismissPwaInstall" class="small" type="button">Senere</button><button id="installPwa" class="primary" type="button">Installer</button></div></aside>
+  <aside id="pwaUpdateBar" class="pwa-prompt hidden" aria-label="Oppdater Apart Tid ADMIN"><div><strong>Ny versjon er klar</strong><span>Oppdater for å bruke siste versjon.</span></div><div class="actions"><button id="dismissPwaUpdate" class="small" type="button">Senere</button><button id="updatePwa" class="primary" type="button">Oppdater nå</button></div></aside>
+
+  <main class="admin-app-main">
+    <section id="login" class="admin-app-login">
+      <div class="admin-app-intro"><p class="eyebrow">Apart Stavanger AS</p><h1>ADMIN</h1><p>En rask oversikt over bemanning, innstempling og vaktendringer.</p></div>
+      <form id="emailForm" class="card auth-card"><p class="eyebrow">Sikker innlogging</p><h2>Logg inn</h2><label>E-postadresse<input id="email" type="email" required autocomplete="email" placeholder="navn@apartstavanger.no"></label><button class="primary">Send engangskode</button><p class="hint">Du mottar en engangskode på e-post.</p></form>
+      <form id="codeForm" class="card auth-card hidden"><p class="eyebrow">Sjekk e-posten din</p><h2>Skriv inn koden</h2><p id="sentTo" class="hint"></p><label>Engangskode<input id="code" inputmode="numeric" pattern="(?:[0-9]{6}|[0-9]{8})" maxlength="8" autocomplete="one-time-code" required placeholder="00000000"></label><button class="primary">Bekreft og logg inn</button><button id="back" type="button" class="link">Bruk en annen e-postadresse</button></form>
+    </section>
+
+    <section id="adminApp" class="hidden">
+      <header class="admin-app-welcome"><div><p class="eyebrow">Bemanningsoversikt</p><h1 id="welcome">Hei</h1><p id="identity" class="muted"></p></div><span class="badge">Admin</span></header>
+
+      <nav class="admin-app-date-nav" aria-label="Velg dag">
+        <button id="previousDay" class="secondary" aria-label="Forrige dag">←</button>
+        <button id="today" class="admin-app-date-button"><strong id="dateHeading">I dag</strong><span id="dateLabel"></span></button>
+        <button id="nextDay" class="secondary" aria-label="Neste dag">→</button>
+      </nav>
+
+      <section id="summary" class="admin-app-summary" aria-label="Dagens status"></section>
+
+      <section class="card admin-app-section">
+        <div class="admin-app-section-head"><div><p class="eyebrow">Vaktliste</p><h2>Vakter denne dagen</h2></div><span id="rosterStatus" class="status draft"></span></div>
+        <p class="muted admin-app-section-note">Trykk på en vakt for å bytte ansatt.</p>
+        <div id="shiftList" class="admin-app-shifts"><div class="empty">Henter vakter …</div></div>
+        <div id="absenceList" class="admin-app-absences"></div>
+      </section>
+
+      <section class="card admin-app-section">
+        <div class="admin-app-section-head"><div><p class="eyebrow">Oppfølging</p><h2>Gjøremål</h2></div><span id="taskBadge" class="status pending"></span></div>
+        <div id="taskList"></div>
+      </section>
+
+      <a class="secondary admin-app-open-full" href="/">Åpne hele Apart Tid</a>
+    </section>
+  </main>
+
+  <dialog id="quickShiftDialog"><form id="quickShiftForm" class="modal admin-quick-shift"><p class="eyebrow">Hurtigendring</p><h2 id="quickShiftHeading">Bytt ansatt på vakt</h2><input id="quickShiftId" type="hidden"><div id="quickShiftDetails" class="quick-shift-summary"></div><label>Velg ansatt<select id="quickShiftEmployee" required></select></label><label>Årsak til endringen<select id="quickShiftReason" required><option value="">Velg årsak</option><option value="Sykdom eller sykefravær">Sykdom eller sykefravær</option><option value="Annet fravær">Annet fravær</option><option value="Bytte mellom ansatte">Bytte mellom ansatte</option><option value="Annen bemanningsendring">Annen bemanningsendring</option></select></label><p id="quickShiftAvailability" class="dashboard-note hidden"></p><p class="hint">Ferie, permisjon, sykefravær og overlappende vakter kontrolleres før endringen lagres.</p><div class="quick-publish-actions"><button id="cancelQuickShift" type="button" class="secondary">Avbryt</button><button type="submit" class="secondary" data-publish="email">Lagre og varsle</button><button type="submit" class="primary" data-publish="silent">Lagre uten varsel</button></div></form></dialog>
+  <dialog id="installHelpDialog"><div class="modal"><p class="eyebrow">Installer på iPhone eller iPad</p><h2>Legg ADMIN på hjemskjermen</h2><ol class="install-steps"><li>Åpne denne siden i Safari.</li><li>Trykk på Del-knappen.</li><li>Velg «Legg til på Hjem-skjermen».</li><li>Kontroller at navnet er «Apart Tid ADMIN», og trykk «Legg til».</li></ol><p class="hint">Ikonet åpner deretter direkte i ADMIN-oversikten og beholder innloggingen på denne enheten.</p><div class="modal-actions"><button id="closeInstallHelp" type="button" class="primary">Ferdig</button></div></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/admin-app.js" defer></script>
+</body>
+</html>
