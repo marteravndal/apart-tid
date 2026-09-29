@@ -46,7 +46,9 @@ Deno.serve(async(req:Request)=>{
   }
   if(req.method==="PATCH"&&action==="handle"){
     if(me.role!=="admin")return json({error:"Kun administrator har tilgang."},403);const id=String(body.id||""),status=String(body.status||""),comment=String(body.admin_comment||"").trim();if(!id||!["approved","rejected"].includes(status))return json({error:"Velg godkjenn eller avvis."},400);if(status==="rejected"&&comment.length<3)return json({error:"Skriv en kort kommentar ved avvisning."},400);
-    const {data,error}=await admin.rpc("process_sick_leave_request",{p_request_id:id,p_status:status,p_admin_comment:comment,p_handled_by:authData.user.id});if(error)return json({error:error.message},400);return json({result:data});
+    const {data,error}=await admin.rpc("process_sick_leave_request",{p_request_id:id,p_status:status,p_admin_comment:comment,p_handled_by:authData.user.id});if(error)return json({error:error.message},400);
+    let followupCaseId:string|null=null;if(status==="approved"){const result=await admin.rpc("ensure_sick_followup_case",{p_request_id:id,p_actor_id:authData.user.id});if(result.error)return json({error:`Fraværet ble godkjent, men oppfølgingssaken kunne ikke opprettes: ${result.error.message}`},500);followupCaseId=result.data}
+    return json({result:data,followup_case_id:followupCaseId});
   }
   return json({error:"Handling støttes ikke."},405);
 });

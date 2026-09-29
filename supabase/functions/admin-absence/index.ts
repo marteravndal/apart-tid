@@ -36,7 +36,8 @@ Deno.serve(async(req:Request)=>{
     const adjustmentDays=dates(start,end).filter(value=>type!=="medical_certificate"||[1,2,3,4,5].includes(new Date(`${value}T12:00:00Z`).getUTCDay()));
     if(adjustmentDays.length){const rows=adjustmentDays.map(workDate=>({organization_id:me.organization_id,employee_id:employeeId,work_date:workDate,category:"sick_pay",hours:8,note:labels[type],created_by:authData.user.id,sick_leave_request_id:result.data.id}));const adjustment=await admin.from("payroll_adjustments").insert(rows);if(adjustment.error){await admin.from("sick_leave_requests").delete().eq("id",result.data.id);return json({error:adjustment.error.message},400)}}
     await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"admin_create_absence",entity_type:"sick_leave_request",entity_id:result.data.id,details:{employee_id:employeeId,absence_type:type,start_date:start,end_date:end,note:note||null,notification_sent:false,payroll_days:adjustmentDays.length}});
-    return json({absence:{...result.data,employee_id:employeeId,absence_type:type,start_date:start,end_date:end},notification_sent:false},201);
+    let followupCaseId:string|null=null;if(type==="medical_certificate"){const followup=await admin.rpc("ensure_sick_followup_case",{p_request_id:result.data.id,p_actor_id:authData.user.id});if(followup.error)return json({error:`Fraværet ble registrert, men oppfølgingssaken kunne ikke opprettes: ${followup.error.message}`},500);followupCaseId=followup.data}
+    return json({absence:{...result.data,employee_id:employeeId,absence_type:type,start_date:start,end_date:end},followup_case_id:followupCaseId,notification_sent:false},201);
   }
   const year=Number(start.slice(0,4)),requestedDays=Math.max(1,weekdays(start,end));
   if(type==="vacation"){
