@@ -7,6 +7,7 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Content-Type": "application/json",
+  "Cache-Control": "no-store",
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: cors });
 const sha256 = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -49,7 +50,7 @@ Deno.serve(async (req: Request) => {
     let qrStatus = null;
     if (employee.role === "admin") {
       const now = new Date().toISOString();
-      const { data: activeQr } = await admin.from("qr_codes").select("id,expires_at,created_at,location_check_required").eq("worksite_id", worksite.id).is("revoked_at", null).lte("valid_from", now).gt("expires_at", now).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const { data: activeQr } = await admin.from("qr_codes").select("id,expires_at,created_at,location_check_required,reserve_code").eq("worksite_id", worksite.id).is("revoked_at", null).lte("valid_from", now).gt("expires_at", now).order("created_at", { ascending: false }).limit(1).maybeSingle();
       qrStatus = activeQr;
     }
     return json({ employee: { id: employee.id, name: employee.full_name }, worksite, open_entry: openEntry, entries: entries || [], adjustments: adjustments || [], approvals: approvals || [], qr_status: qrStatus });
@@ -78,11 +79,13 @@ Deno.serve(async (req: Request) => {
     const now = new Date(), expires = new Date(now);
     expires.setUTCMonth(expires.getUTCMonth() + 6);
     await admin.from("qr_codes").update({ revoked_at: now.toISOString() }).eq("worksite_id", worksite.id).is("revoked_at", null);
-    const { error } = await admin.from("qr_codes").insert({ worksite_id: worksite.id, token_hash: await sha256(token), valid_from: now.toISOString(), expires_at: expires.toISOString(), created_by: authData.user.id, location_check_required: locationCheckRequired });
+    const { data: issuedQr, error } = await admin.from("qr_codes").insert({ worksite_id: worksite.id, token_hash: await sha256(token), valid_from: now.toISOString(), expires_at: expires.toISOString(), created_by: authData.user.id, location_check_required: locationCheckRequired }).select("reserve_code").single();
     if (error) return json({ error: error.message }, 400);
-    const qrSvg = await QRCode.toString(qrUrl.toString(), { type: "svg", errorCorrectionLevel: "H", margin: 2, width: 420 });
+    const rawSvg = await QRCode.toString(qrUrl.toString(), { type: "svg", errorCorrectionLevel: "H", margin: 2, width: 420 });
+    const reserveLabel = issuedQr.reserve_code.replace(/(\d{4})(\d{4})/, "$1 $2");
+    const qrSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="490" viewBox="0 0 420 490"><rect width="420" height="490" fill="white"/>${rawSvg}<text x="210" y="445" text-anchor="middle" font-family="sans-serif" font-size="16">Reservekode (uten kamera)</text><text x="210" y="475" text-anchor="middle" font-family="sans-serif" font-size="26" font-weight="bold">${reserveLabel}</text></svg>`;
     await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "issue_qr", entity_type: "worksite", entity_id: worksite.id, details: { expires_at: expires.toISOString(), location_check_required: locationCheckRequired } });
-    return json({ qr_svg: qrSvg, expires_at: expires.toISOString(), worksite: worksite.name, location_check_required: locationCheckRequired }, 201);
+    return json({ qr_svg: qrSvg, reserve_code: issuedQr.reserve_code, expires_at: expires.toISOString(), worksite: worksite.name, location_check_required: locationCheckRequired }, 201);
   }
 
   if (action === "revoke_qr") {
@@ -97,11 +100,23 @@ Deno.serve(async (req: Request) => {
   if (action !== "clock_in" && action !== "clock_out") return json({ error: "Ugyldig handling." }, 400);
   const latitude = Number(body.latitude), longitude = Number(body.longitude), accuracy = Number(body.accuracy);
   const rawQr = String(body.qr_token || "").replace(/^APART-TID:/, "").trim();
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !rawQr) return json({ error: "QR-kode og posisjon er påkrevd." }, 400);
+  const reserveCode = String(body.reserve_code || "").replace(/[\s-]/g, "");
+  if (body.latitude == null || body.longitude == null || !Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude)>90 || Math.abs(longitude)>180 || (!rawQr && !reserveCode)) return json({ error: "QR-kode eller reservekode og posisjon er påkrevd." }, 400);
+  if (reserveCode && !/^\d{8}$/.test(reserveCode)) return json({ error: "Reservekoden skal ha åtte sifre." }, 400);
   const distance = distanceMeters(latitude, longitude, worksite.latitude, worksite.longitude);
   const now = new Date();
-  const { data: qr } = await admin.from("qr_codes").select("id,location_check_required").eq("worksite_id", worksite.id).eq("token_hash", await sha256(rawQr)).is("revoked_at", null).lte("valid_from", now.toISOString()).gt("expires_at", now.toISOString()).maybeSingle();
-  if (!qr) return json({ error: "QR-koden er ugyldig eller utløpt." }, 403);
+  let qr: {id:string;location_check_required:boolean}|null = null;
+  if (reserveCode) {
+    const {data:result,error} = await admin.rpc("verify_qr_reserve", {p_employee_id:employee.id,p_worksite_id:worksite.id,p_code:reserveCode});
+    if(error)return json({error:"Reservekoden kunne ikke kontrolleres. Prøv igjen senere."},503);
+    if(result?.status==="limited")return json({error:`For mange feilforsøk. Prøv igjen om ${Math.ceil(result.retry_after/60)} minutter, eller skann QR-koden.`,retry_after:result.retry_after},429);
+    if(result?.status==="valid")qr={id:result.id,location_check_required:result.location_check_required};
+  } else {
+    const {data,error} = await admin.from("qr_codes").select("id,location_check_required").eq("worksite_id", worksite.id).eq("token_hash", await sha256(rawQr)).is("revoked_at", null).lte("valid_from", now.toISOString()).gt("expires_at", now.toISOString()).maybeSingle();
+    if(error)return json({error:"QR-koden kunne ikke kontrolleres. Prøv igjen senere."},503);
+    qr=data;
+  }
+  if (!qr) return json({ error: reserveCode ? "Reservekoden er ugyldig eller utløpt. Kontroller koden på arbeidsstedet." : "QR-koden er ugyldig eller utløpt." }, 403);
   if (qr.location_check_required && (!Number.isFinite(accuracy) || accuracy <= 0)) return json({ error: "Telefonen oppga ikke tilstrekkelig posisjonsnøyaktighet. Prøv igjen med posisjon aktivert." }, 403);
   if (qr.location_check_required && accuracy > 100) return json({ error: `Posisjonen er for unøyaktig (${Math.round(accuracy)} meter). Gå nærmere inngangen eller prøv igjen utendørs.`, accuracy_meters: Math.round(accuracy) }, 403);
   if (qr.location_check_required && distance > worksite.radius_meters) return json({ error: `Du er ${Math.round(distance)} meter fra arbeidsstedet. Tillatt radius er ${worksite.radius_meters} meter.`, distance_meters: Math.round(distance) }, 403);
