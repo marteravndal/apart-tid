@@ -55,3 +55,9 @@ textarea{width:100%;border:1px solid var(--line);border-radius:11px;padding:12px
 #stampShiftDialog{width:min(620px,calc(100vw - 28px))}#stampShiftDialog p{overflow-wrap:anywhere}
 #stampShiftDialog input{min-width:0;max-width:100%}
 @media(max-width:520px){#stampShiftDialog .grid{grid-template-columns:1fr}}
+
+/* Diploma actions remain separate from the course-opening button. */
+.course-completion{margin-bottom:12px}
+.course-completion .course-employee-card{width:100%;margin-bottom:6px}
+.course-diploma-download{white-space:nowrap}
+.course-log>div{flex-wrap:wrap;gap:8px}

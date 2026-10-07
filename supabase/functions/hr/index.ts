@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { repairPendingDiplomas } from "../_shared/course-diplomas.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 
@@ -34,6 +35,7 @@ Deno.serve(async(req:Request)=>{
   const {data:me}=await admin.from("employees").select("id,organization_id,role,active,full_name,email").eq("auth_user_id",authData.user.id).maybeSingle();if(!me?.active)return json({error:"Brukeren er ikke aktiv."},403);
 
   if(req.method==="GET"){
+    await repairPendingDiplomas(admin,me);
     let docs=admin.from("hr_documents").select("id,employee_id,batch_id,title,document_type,original_name,mime_type,size_bytes,requires_signature,signature_status,read_at,signed_at,created_at,storage_path,employees(employee_number,full_name,email)").eq("organization_id",me.organization_id).order("created_at",{ascending:false});
     let contracts=admin.from("hr_contracts").select("id,employee_id,title,content,locked_content,modules,locked_modules,status,version,locked_at,signed_at,created_at,updated_at,employees(employee_number,full_name,email,phone_number)").eq("organization_id",me.organization_id).order("updated_at",{ascending:false});
     if(me.role!=="admin"){docs=docs.eq("employee_id",me.id);contracts=contracts.eq("employee_id",me.id).neq("status","draft")}
@@ -102,3 +104,4 @@ Deno.serve(async(req:Request)=>{
   if(req.method==="POST"&&action==="start_signing")return json({error:"Signicat er ikke konfigurert ennå. Kontrakten er låst og klar for tilkobling."},409);
   return json({error:"Handling støttes ikke."},405);
 });
+

@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { ensureCourseDiploma, repairPendingDiplomas } from "../_shared/course-diplomas.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
 const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"GET, POST, PATCH, OPTIONS","Content-Type":"application/json"};
@@ -19,6 +20,7 @@ Deno.serve(async(req:Request)=>{
   const {data:me}=await admin.from("employees").select("id,organization_id,role,active,full_name,email").eq("auth_user_id",authData.user.id).maybeSingle();if(!me?.active)return json({error:"Brukeren er ikke aktiv."},403);
 
   if(req.method==="GET"){
+    await repairPendingDiplomas(admin,me);
     if(me.role==="admin"){
       const [{data:courses,error:courseError},{data:assignments,error:assignmentError},{data:staff,error:staffError}]=await Promise.all([
         admin.from("courses").select("id,family_id,parent_version_id,title,description,modules,questions,passing_score,status,version,locked_at,created_at,updated_at").eq("organization_id",me.organization_id).order("status",{ascending:true}).order("updated_at",{ascending:false}),
@@ -39,12 +41,29 @@ Deno.serve(async(req:Request)=>{
     if(result.error)return json({error:result.error.message},400);return json({ok:true});
   }
   if(req.method==="POST"&&action==="submit"){
-    const id=String(body.assignment_id||""),answers=Array.isArray(body.answers)?body.answers:[];const {data:assignment}=await admin.from("course_assignments").select("id,status,course_id,attempts,courses!inner(questions,passing_score,status)").eq("id",id).eq("employee_id",me.id).eq("organization_id",me.organization_id).neq("status","completed").maybeSingle();if(!assignment||(assignment.courses as any).status!=="locked")return json({error:"Kurset er ikke tilgjengelig."},404);
+    const id=String(body.assignment_id||""),answers=Array.isArray(body.answers)?body.answers:[];const {data:assignment}=await admin.from("course_assignments").select("id,status,course_id,attempts,courses!inner(questions,passing_score,status)").eq("id",id).eq("employee_id",me.id).eq("organization_id",me.organization_id).maybeSingle();if(!assignment||(assignment.courses as any).status!=="locked")return json({error:"Kurset er ikke tilgjengelig."},404);
     const questions=cleanQuestions((assignment.courses as any).questions).filter(q=>q.active);if(!questions.length)return json({error:"Kurset mangler kunnskapstest."},409);
     const byId=new Map(answers.map((a:any)=>[String(a.question_id),Number(a.option_index)]));const correct=questions.filter(q=>byId.get(q.id)===q.correct_index).length,score=Math.round(correct/questions.length*100),passed=score>=Number((assignment.courses as any).passing_score),now=new Date().toISOString();
-    const attempt=await admin.from("course_attempts").insert({assignment_id:id,employee_id:me.id,score,passed,answers:questions.map(q=>({question_id:q.id,option_index:byId.has(q.id)?byId.get(q.id):null}))});if(attempt.error)return json({error:attempt.error.message},400);
-    const patch:any={attempts:Number((assignment as any).attempts||0)+1,score};if(passed){patch.status="completed";patch.completed_at=now}else if(assignment.status==="assigned"){patch.status="in_progress";patch.started_at=now}const updated=await admin.from("course_assignments").update(patch).eq("id",id).select("id").maybeSingle();if(updated.error)return json({error:updated.error.message},400);
-    await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:passed?"complete_course":"attempt_course",entity_type:"course_assignment",entity_id:id,details:{score,passed}});return json({score,passed,passing_score:(assignment.courses as any).passing_score});
+    const result=await admin.rpc("record_course_attempt",{p_assignment_id:id,p_employee_id:me.id,p_organization_id:me.organization_id,p_actor_id:authData.user.id,p_score:score,p_passed:passed,p_answers:questions.map(q=>({question_id:q.id,option_index:byId.has(q.id)?byId.get(q.id):null}))});
+    if(result.error)return json({error:"Resultatet kunne ikke lagres. Prøv igjen."},400);
+    let diplomaReady=false;
+    if(result.data.passed){try{await ensureCourseDiploma(admin,me.organization_id,id);diplomaReady=true}catch{console.error("Course passed; diploma pending",id)}}
+    return json({...result.data,passing_score:(assignment.courses as any).passing_score,diploma_ready:diplomaReady});
+  }
+  if(req.method==="POST"&&action==="download_diploma"){
+    const id=String(body.assignment_id||"");
+    let query=admin.from("course_assignments").select("id").eq("id",id).eq("organization_id",me.organization_id).eq("status","completed");
+    if(me.role!=="admin")query=query.eq("employee_id",me.id);
+    const {data:assignment,error:assignmentError}=await query.maybeSingle();
+    if(assignmentError||!assignment)return json({error:"Diplomet finnes ikke, eller kurset er ikke bestått."},404);
+    try{
+      const diploma=await ensureCourseDiploma(admin,me.organization_id,id);
+      const {data:document,error}=await admin.from("hr_documents").select("storage_path,original_name").eq("id",diploma.document_id).eq("organization_id",me.organization_id).single();
+      if(error||!document)throw new Error("Dokumentet kunne ikke hentes.");
+      const {data:signed,error:signError}=await admin.storage.from("hr-documents").createSignedUrl(document.storage_path,120,{download:document.original_name});
+      if(signError||!signed?.signedUrl)throw new Error("Nedlastingen kunne ikke klargjøres.");
+      return json({url:signed.signedUrl,file_name:document.original_name});
+    }catch{return json({error:"Kurset er bestått, men diplomet kunne ikke klargjøres akkurat nå. Prøv igjen senere."},503)}
   }
   if(me.role!=="admin")return json({error:"Kun administrator har tilgang."},403);
 
@@ -67,3 +86,4 @@ Deno.serve(async(req:Request)=>{
   }
   return json({error:"Handling støttes ikke."},405);
 });
+
