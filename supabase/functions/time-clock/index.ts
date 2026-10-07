@@ -41,7 +41,9 @@ Deno.serve(async (req: Request) => {
       admin.from("month_approvals").select("month_start,status,approved_at").eq("employee_id", employee.id).gte("month_start", sinceDate.slice(0, 7) + "-01").order("month_start", { ascending: false }),
     ]);
     if (error || statusError) return json({ error: "Timelisten kunne ikke hentes. Prøv igjen." }, 503);
-    return json({ employee: { id: employee.id, name: employee.full_name }, worksite, open_entry: openEntry, entries: entries || [], adjustments: adjustments || [], approvals: approvals || [] });
+    const { data: gate, error: gateError } = openEntry ? { data: null, error: null } : await admin.rpc("clock_in_gate", { p_employee_id: employee.id, p_organization_id: employee.organization_id });
+    if (gateError) return json({ error: "Kunne ikke kontrollere vaktlisten. Prøv igjen." }, 503);
+    return json({ clock_in_gate: gate, employee: { id: employee.id, name: employee.full_name }, worksite, open_entry: openEntry, entries: entries || [], adjustments: adjustments || [], approvals: approvals || [] });
   }
 
   if (req.method !== "POST") return json({ error: "Handling støttes ikke." }, 405);
@@ -75,6 +77,9 @@ Deno.serve(async (req: Request) => {
 
   if (action === "clock_in") {
     if (openEntry) return json({ error: "Du er allerede stemplet inn." }, 409);
+    const { data: gate, error: gateError } = await admin.rpc("clock_in_gate", { p_employee_id: employee.id, p_organization_id: employee.organization_id });
+    if (gateError || !gate) return json({ error: "Kunne ikke kontrollere vaktlisten. Prøv igjen." }, 503);
+    if (!gate.allowed) return json({ error: gate.message, clock_in_gate: gate }, 409);
     const { data: entry, error } = await admin.from("time_entries").insert({ organization_id: employee.organization_id, employee_id: employee.id, worksite_id: worksite.id, kind: "work", started_at: now.toISOString(), clock_in_latitude: latitude, clock_in_longitude: longitude, source: "location", created_by: authData.user.id }).select("id,started_at,ended_at").single();
     if (error) return json({ error: error.message }, 409);
     await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "clock_in", entity_type: "time_entry", entity_id: entry.id, details: { distance_meters: Math.round(distance), accuracy_meters: Number.isFinite(accuracy) ? Math.round(accuracy) : null, method: "location", location_check_required: true } });

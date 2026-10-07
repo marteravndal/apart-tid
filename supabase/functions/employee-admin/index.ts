@@ -149,12 +149,13 @@ Deno.serve(async (req: Request) => {
   }
 
   if (req.method === "GET") {
-    const [{ data, error }, { data: entries, error: entriesError }, { data: detailRows, error: detailsError }] = await Promise.all([
+    const [{ data, error }, { data: entries, error: entriesError }, { data: detailRows, error: detailsError }, { data: openEntries, error: openEntriesError }] = await Promise.all([
       admin.from("employees").select("id, employee_number, full_name, email, phone_number, role, active, created_at, deactivated_at, invited_at").eq("organization_id", currentEmployee.organization_id).order("active", { ascending: false }).order("full_name"),
       admin.from("time_entries").select("id,employee_id,started_at,ended_at,source,auto_clocked_out").eq("organization_id", currentEmployee.organization_id).order("started_at", { ascending: false }).limit(500),
       admin.from("employee_private_details").select("employee_id,address,postal_code,city,bank_account,national_identity_number,employed_from,position_percent,salary_type,salary_rate").eq("organization_id", currentEmployee.organization_id),
+      admin.from("time_entries").select("id,employee_id,started_at,ended_at,source").eq("organization_id", currentEmployee.organization_id).is("ended_at",null),
     ]);
-    if (error || entriesError || detailsError) return json({ error: error?.message || entriesError?.message || detailsError?.message }, 400);
+    if (error || entriesError || detailsError || openEntriesError) return json({ error: error?.message || entriesError?.message || detailsError?.message || openEntriesError?.message }, 400);
     const statusByEmployee = new Map<string, { open_entry: unknown; last_entry: unknown }>();
     for (const entry of entries || []) {
       const status = statusByEmployee.get(entry.employee_id) || { open_entry: null, last_entry: null };
@@ -162,8 +163,27 @@ Deno.serve(async (req: Request) => {
       if (!entry.ended_at && !status.open_entry) status.open_entry = entry;
       statusByEmployee.set(entry.employee_id, status);
     }
+    for (const entry of openEntries || []) { const status = statusByEmployee.get(entry.employee_id) || {open_entry:null,last_entry:entry}; status.open_entry=entry; statusByEmployee.set(entry.employee_id,status); }
     const detailsByEmployee = new Map((detailRows || []).map((row) => [row.employee_id, row]));
     return json({ employees: (data || []).map((employee) => { const details = detailsByEmployee.get(employee.id) || {}; const { employee_id: _, ...safeDetails } = details as any; return ({ ...employee, ...safeDetails, ...(statusByEmployee.get(employee.id) || { open_entry: null, last_entry: null }) }); }) });
+  }
+
+  if (req.method === "POST" && action === "clock_log") {
+    const employeeId = String(body.employee_id || ""), days = Number(body.days || 30);
+    if (![7,30,90].includes(days)) return json({ error: "Velg 7, 30 eller 90 dager." }, 400);
+    const { data: target } = await admin.from("employees").select("id,full_name").eq("id",employeeId).eq("organization_id",currentEmployee.organization_id).maybeSingle();
+    if (!target) return json({ error: "Fant ikke den ansatte." }, 404);
+    const since = new Date(Date.now()-days*86400000).toISOString();
+    const { data: rows, error } = await admin.from("time_entries").select("id,started_at,ended_at,source,auto_clocked_out,note").eq("employee_id",employeeId).eq("organization_id",currentEmployee.organization_id).gte("started_at",since).order("started_at",{ascending:false}).limit(201);
+    if (error) return json({error:"Stemplingsloggen kunne ikke hentes."},503);
+    const entries = (rows || []).slice(0,200), ids = entries.map(x=>x.id);
+    const { data: events, error: eventsError } = ids.length ? await admin.from("audit_logs").select("id,actor_id,action,created_at,entity_id,details").eq("organization_id",currentEmployee.organization_id).eq("entity_type","time_entry").in("entity_id",ids).order("created_at",{ascending:false}).limit(501) : {data:[],error:null};
+    if (eventsError) return json({error:"Endringsloggen kunne ikke hentes."},503);
+    const actorIds = [...new Set((events || []).map(x=>x.actor_id).filter(Boolean))];
+    const { data: actors, error: actorsError } = actorIds.length ? await admin.from("employees").select("auth_user_id,full_name").eq("organization_id",currentEmployee.organization_id).in("auth_user_id",actorIds) : {data:[],error:null};
+    if (actorsError) return json({error:"Loggens registratorer kunne ikke hentes."},503);
+    const names = new Map((actors || []).map(x=>[x.auth_user_id,x.full_name]));
+    return json({employee:target,entries,truncated:(rows || []).length>200,events_truncated:(events || []).length>500,events:(events || []).slice(0,500).map(x=>({id:x.id,entry_id:x.entity_id,at:x.created_at,action:x.action,actor:names.get(x.actor_id)||"System / tidligere bruker",reason:x.details?.reason||null,before:x.details?.before?{started_at:x.details.before.started_at,ended_at:x.details.before.ended_at}:null,after:x.details?.after?{started_at:x.details.after.started_at,ended_at:x.details.after.ended_at}:null}))});
   }
 
   if (req.method === "POST" && action === "employee_report_pdf") {
@@ -204,11 +224,12 @@ Deno.serve(async (req: Request) => {
     if ((clockAction !== "clock_in" && clockAction !== "clock_out") || reason.length < 3) return json({ error: "Velg inn- eller utstempling og skriv en begrunnelse." }, 400);
     const { data: target } = await admin.from("employees").select("id,active,full_name").eq("id", employeeId).eq("organization_id", currentEmployee.organization_id).maybeSingle();
     if (!target) return json({ error: "Fant ikke den ansatte." }, 404);
-    if (!target.active) return json({ error: "Inaktive ansatte kan ikke stemples." }, 409);
+    if (!target.active && clockAction === "clock_in") return json({ error: "Inaktive ansatte kan ikke stemples inn." }, 409);
     const osloDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Oslo" }).format(new Date());
     const { data: lockedReport } = await admin.from("daily_reports").select("id").eq("organization_id", currentEmployee.organization_id).eq("work_date", osloDate).eq("status", "locked").maybeSingle();
     if (lockedReport) return json({ error: "Dagens rapport er låst og kan ikke endres." }, 409);
-    const { data: openEntry } = await admin.from("time_entries").select("id,note").eq("employee_id", employeeId).is("ended_at", null).maybeSingle();
+    const { data: openEntry, error: openError } = await admin.from("time_entries").select("id,note,started_at,ended_at").eq("employee_id", employeeId).is("ended_at", null).maybeSingle();
+    if (openError) return json({error:"Stemplingsstatusen kunne ikke kontrolleres."},503);
     const now = new Date().toISOString();
     let entry;
     if (clockAction === "clock_in") {
@@ -219,13 +240,14 @@ Deno.serve(async (req: Request) => {
       if (result.error) return json({ error: result.error.message }, 400);
       entry = result.data;
     } else {
-      if (!openEntry) return json({ error: "Den ansatte er ikke stemplet inn." }, 409);
+      if (!openEntry || body.open_entry_id !== openEntry.id) return json({ error: "Stemplingsstatusen har endret seg. Hent ansatte på nytt." }, 409);
       const note = [openEntry.note, `Manuell utstempling: ${reason}`].filter(Boolean).join("\n");
-      const result = await admin.from("time_entries").update({ ended_at: now, note, updated_at: now }).eq("id", openEntry.id).select("id,started_at,ended_at").single();
+      const result = await admin.from("time_entries").update({ ended_at: now, note, updated_at: now }).eq("id", openEntry.id).is("ended_at",null).select("id,started_at,ended_at").maybeSingle();
       if (result.error) return json({ error: result.error.message }, 400);
+      if (!result.data) return json({error:"Den ansatte er allerede stemplet ut."},409);
       entry = result.data;
     }
-    await admin.from("audit_logs").insert({ organization_id: currentEmployee.organization_id, actor_id: currentUser.id, action: clockAction === "clock_in" ? "manual_clock_in" : "manual_clock_out", entity_type: "time_entry", entity_id: entry.id, details: { employee_id: employeeId, employee_name: target.full_name, reason } });
+    await admin.from("audit_logs").insert({ organization_id: currentEmployee.organization_id, actor_id: currentUser.id, action: clockAction === "clock_in" ? "manual_clock_in" : "manual_clock_out", entity_type: "time_entry", entity_id: entry.id, details: { employee_id: employeeId, employee_name: target.full_name, reason, before: openEntry ? {started_at:openEntry.started_at,ended_at:openEntry.ended_at} : null, after: {started_at:entry.started_at,ended_at:entry.ended_at} } });
     return json({ entry, employee: target });
   }
 

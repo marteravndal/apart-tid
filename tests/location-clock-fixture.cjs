@@ -8,7 +8,7 @@ function fixture(options={}){
   const employee={id:'test-employee',organization_id:'test-org',full_name:'Test Ansatt',role:options.role||'employee',active:options.active!==false};
   const worksite={id:'test-site',name:'Teststed',address:'Testadresse',latitude:59,longitude:6,radius_meters:100};
   const entries=[];
-  const db={auth:{getUser:async()=>({data:{user:options.unauthenticated?null:{id:'test-user'}}})},from(table){
+  const db={auth:{getUser:async()=>({data:{user:options.unauthenticated?null:{id:'test-user'}}})},rpc:async()=>options.gateError?{error:{message:'offline'}}:{data:options.gate||{allowed:true}},from(table){
     const q={table,kind:'read',filters:[]};queries.push(q);const builder={};
     for(const method of ['select','eq','is','gte','order','limit'])builder[method]=(...args)=>{q.filters.push([method,...args]);return builder};
     for(const method of ['insert','update'])builder[method]=values=>{q.kind=method;q.values=values;writes.push(q);return builder};
