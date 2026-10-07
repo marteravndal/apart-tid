@@ -33,3 +33,19 @@ textarea{width:100%;border:1px solid var(--line);border-radius:11px;padding:12px
 .clock-message{margin:14px 0;padding:14px 16px;border-radius:12px;border:1px solid #cbd9d0;line-height:1.55;overflow-wrap:anywhere}.clock-message.info{background:#f0f5f2;color:#233e32}.clock-message.success{background:#e5f4ea;border-color:#94c7a5;color:#175d32;font-weight:700}.clock-message.error{background:#fff0ea;border:2px solid #b7492d;color:#812d1d;font-weight:700}.location-help{margin:16px 0;border:1px solid var(--line);border-radius:12px;padding:12px 14px;line-height:1.55}.location-help summary{cursor:pointer;font-weight:750}.location-help ul{padding-left:20px}.location-help li+li{margin-top:12px}.location-help p,.location-help li{font-size:.9rem}.position-test-card{padding:24px;margin-top:18px}.position-test-card h3{margin-top:0}#scanClock{min-height:60px;font-size:1.15rem}#scanClock:disabled{opacity:.65;cursor:wait}
 
 #clockLogDialog{width:min(850px,calc(100vw - 24px));max-width:none}.clock-log-modal{width:100%;max-width:none;max-height:88vh;overflow:auto}.clock-log-row{padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin:8px 0;overflow-wrap:anywhere}.clock-log-row small{display:block;color:var(--muted);margin-top:5px}.clock-log-row p{margin:8px 0 0}.clock-log-row.attention{border-color:#dbab67;background:#fff5e6}.clock-log-modal details{margin-top:20px}.clock-log-modal summary{cursor:pointer;font-weight:750}.clock-log-modal .actions{flex-wrap:wrap}
+
+/* Clock register fits the existing admin width and stacks cleanly on phones. */
+.stamping-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:14px;align-items:end}
+.stamping-filters input,.stamping-filters select{width:100%;min-width:0}
+.stamping-list{display:grid;gap:14px}.stamp-card{min-width:0;padding:20px}
+.stamp-card-head{display:flex;justify-content:space-between;gap:12px;align-items:start}
+.stamp-reference{display:block;font-size:11px;color:var(--muted);margin-top:5px;font-variant-numeric:tabular-nums}
+.stamp-times{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:18px 0 8px}
+.stamp-times span{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}
+.stamp-times strong{font-size:13px;font-variant-numeric:tabular-nums}
+.stamp-deleted{border-left:4px solid #a45b43}.stamp-deletion{padding:12px;background:#fff4ed;border-radius:8px;font-size:13px;overflow-wrap:anywhere}
+.stamp-history{margin-top:12px}.stamp-history summary{cursor:pointer;font-size:12px}.stamp-history small{display:block}
+.stamping-pagination{margin:18px 0}.stamp-card p{overflow-wrap:anywhere}
+#deleteStampDialog{width:min(560px,calc(100vw - 28px))}#deleteStampDialog p{overflow-wrap:anywhere}
+@media(max-width:850px){.stamping-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.stamping-filters button{grid-column:1/-1}}
+@media(max-width:520px){.stamp-times{grid-template-columns:1fr;gap:10px}.stamp-times>div{display:flex;justify-content:space-between;gap:12px}.stamp-card{padding:16px}}

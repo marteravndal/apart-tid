@@ -17,7 +17,7 @@ function fixture(options={}){
     return{data:options.foreignEmployee?null:target};
    }
    if(table==='daily_reports')return{data:null};
-   if(table==='time_entries'){
+   if(table==='time_entries'||table==='clock_register'){
     if(q.kind==='update')return{data:options.race?null:{id:'open-entry',started_at:'2026-10-06T21:01:36Z',ended_at:q.values.ended_at}};
     if(q.filters.some(x=>x[0]==='is'))return{data:{id:'open-entry',started_at:'2026-10-06T21:01:36Z',ended_at:null,note:null}};
     return{data:[{id:'open-entry',started_at:'2026-10-06T21:01:36Z',ended_at:null,source:'qr'}]};

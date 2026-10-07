@@ -174,7 +174,7 @@ Deno.serve(async (req: Request) => {
     const { data: target } = await admin.from("employees").select("id,full_name").eq("id",employeeId).eq("organization_id",currentEmployee.organization_id).maybeSingle();
     if (!target) return json({ error: "Fant ikke den ansatte." }, 404);
     const since = new Date(Date.now()-days*86400000).toISOString();
-    const { data: rows, error } = await admin.from("time_entries").select("id,started_at,ended_at,source,auto_clocked_out,note").eq("employee_id",employeeId).eq("organization_id",currentEmployee.organization_id).gte("started_at",since).order("started_at",{ascending:false}).limit(201);
+    const { data: rows, error } = await admin.from("clock_register").select("id,reference_no,started_at,ended_at,source,auto_clocked_out,note,deleted_at,deletion_reason").eq("employee_id",employeeId).eq("organization_id",currentEmployee.organization_id).gte("started_at",since).order("started_at",{ascending:false}).limit(201);
     if (error) return json({error:"Stemplingsloggen kunne ikke hentes."},503);
     const entries = (rows || []).slice(0,200), ids = entries.map(x=>x.id);
     const { data: events, error: eventsError } = ids.length ? await admin.from("audit_logs").select("id,actor_id,action,created_at,entity_id,details").eq("organization_id",currentEmployee.organization_id).eq("entity_type","time_entry").in("entity_id",ids).order("created_at",{ascending:false}).limit(501) : {data:[],error:null};
