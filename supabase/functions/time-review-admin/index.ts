@@ -22,6 +22,18 @@ Deno.serve(async(req:Request)=>{
   const {data:authData,error:authError}=await admin.auth.getUser(auth.slice(7));if(authError||!authData.user)return json({error:"Ugyldig innlogging."},401);
   const {data:me}=await admin.from("employees").select("id,organization_id,role,active").eq("auth_user_id",authData.user.id).maybeSingle();if(!me?.active||me.role!=="admin")return json({error:"Kun administrator har tilgang."},403);
   let body:Record<string,unknown>;try{body=await req.json()}catch{return json({error:"Ugyldig forespørsel."},400)}
+  if(body.action==="stamp_shift"){
+    const shiftId=String(body.shift_id||""),reason=String(body.reason||"").trim(),kind=String(body.kind||"");
+    if(!/^[0-9a-f-]{36}$/i.test(shiftId)||!["work","sick_pay"].includes(kind)||reason.length<3||reason.length>1000||!Number.isFinite(Date.parse(String(body.started_at)))||!Number.isFinite(Date.parse(String(body.ended_at)))||!body.expected)return json({error:"Kontroller vakten, tidene, lønnsarten og begrunnelsen."},400);
+    const {data,error}=await admin.rpc("stamp_roster_shift",{p_organization_id:me.organization_id,p_actor_id:authData.user.id,p_shift_id:shiftId,p_expected:body.expected,p_started_at:body.started_at,p_ended_at:body.ended_at,p_kind:kind,p_reason:reason});
+    if(error)return json({error:error.message},409);return json(data,201);
+  }
+  if(body.action==="roster_attendance"){
+    const ids=body.shift_ids;if(!Array.isArray(ids)||ids.length>250||ids.some(x=>typeof x!=="string"||!/^[0-9a-f-]{36}$/i.test(x)))return json({error:"Ugyldig vaktliste."},400);
+    if(!ids.length)return json({entries:[]});
+    const {data,error}=await admin.from("time_entries").select("id,reference_no,scheduled_shift_id,kind,started_at,ended_at").eq("organization_id",me.organization_id).in("scheduled_shift_id",ids);
+    if(error)return json({error:"Kunne ikke kontrollere etterregistrerte vakter."},503);return json({entries:data||[]});
+  }
   if(body.action==="delete"){
     const entryId=String(body.entry_id||""),reason=String(body.reason||"").trim();
     if(!/^[0-9a-f-]{36}$/i.test(entryId)||reason.length<3||reason.length>1000||!Number.isFinite(Date.parse(String(body.started_at)))||!Number.isFinite(Date.parse(String(body.ended_at))))return json({error:"Velg en avsluttet registrering og skriv en begrunnelse på 3–1000 tegn."},400);

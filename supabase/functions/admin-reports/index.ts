@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
+import { premiumHoursBetween } from "../_shared/payroll-premiums.ts";
 
 const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS","Content-Type":"application/json"};
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:cors});
@@ -26,5 +27,6 @@ Deno.serve(async(req:Request)=>{
   ]);
   if(employeesError||entriesError||adjustmentsError)return json({error:employeesError?.message||entriesError?.message||adjustmentsError?.message},400);
   const ids=new Set((employees||[]).map(e=>e.id));
-  return json({from,to,employees:employees||[],entries:(allEntries||[]).filter(e=>ids.has(e.employee_id)&&localDate(e.started_at)>=from&&localDate(e.started_at)<=to),adjustments:(allAdjustments||[]).filter(a=>ids.has(a.employee_id))});
+  return json({from,to,employees:employees||[],entries:(allEntries||[]).filter(e=>ids.has(e.employee_id)&&localDate(e.started_at)>=from&&localDate(e.started_at)<=to).map(e=>({...e,premium_hours:e.kind==="work"?premiumHoursBetween(e.started_at,e.ended_at):{evening:0,night:0,weekend:0}})),adjustments:(allAdjustments||[]).filter(a=>ids.has(a.employee_id))});
 });
+
