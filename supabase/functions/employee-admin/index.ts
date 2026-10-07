@@ -22,7 +22,7 @@ const sendInvitation = async (employee: { full_name: string; email: string }) =>
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": `employee-invitation-${employee.email.toLowerCase()}` },
       body: JSON.stringify({
         from: "Apart Tid <post@apartstavanger.no>", to: [employee.email], subject: "Velkommen til Apart Tid",
-        html: `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.55;color:#17211f"><h2>Velkommen til Apart Tid</h2><p>Hei ${esc(employee.full_name)}.</p><p>Du er invitert til Apart Tid, systemet vi bruker til arbeidstid, ferie, fravær og HR-dokumenter.</p><h3>Slik logger du inn</h3><ol><li>Åpne <a href="${appUrl}">${appUrl}</a>.</li><li>Skriv inn e-postadressen denne invitasjonen ble sendt til.</li><li>Du mottar en engangskode på e-post. Skriv inn koden for å logge inn.</li></ol><h3>Stemple inn og ut</h3><ol><li>Åpne Apart Tid på telefonen.</li><li>Trykk på knappen for å skanne QR-koden på arbeidsstedet.</li><li>Tillat posisjon når telefonen spør. Posisjonen kontrolleres bare når du stempler.</li><li>Skann koden for å stemple inn. Gjenta når du skal stemple ut.</li></ol><p>Ta kontakt med administrasjonen dersom du ikke mottar innloggingskoden eller trenger hjelp.</p><p>Vennlig hilsen<br>Apart Stavanger AS</p></div>`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.55;color:#17211f"><h2>Velkommen til Apart Tid</h2><p>Hei ${esc(employee.full_name)}.</p><p>Du er invitert til Apart Tid, systemet vi bruker til arbeidstid, ferie, fravær og HR-dokumenter.</p><h3>Slik logger du inn</h3><ol><li>Åpne <a href="${appUrl}">${appUrl}</a>.</li><li>Skriv inn e-postadressen denne invitasjonen ble sendt til.</li><li>Du mottar en engangskode på e-post. Skriv inn koden for å logge inn.</li></ol><h3>Stemple inn og ut</h3><ol><li>Åpne Apart Tid på telefonen.</li><li>Trykk «Stemple inn» når du kommer og «Stemple ut» når du går.</li><li>Tillat posisjon når telefonen spør. Posisjonen kontrolleres bare når du stempler.</li><li>Vent på bekreftelsen på at stemplingen er registrert. QR-koden på arbeidsstedet er bare en snarvei til nettsiden.</li></ol><p>Ta kontakt med administrasjonen dersom du ikke mottar innloggingskoden eller trenger hjelp.</p><p>Vennlig hilsen<br>Apart Stavanger AS</p></div>`,
       }),
     });
     return response.ok;
@@ -317,3 +317,4 @@ Deno.serve(async (req: Request) => {
 
   return json({ error: "Handling støttes ikke." }, 405);
 });
+

@@ -10,18 +10,12 @@ const cors = {
   "Cache-Control": "no-store",
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: cors });
-const sha256 = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))).map((b) => b.toString(16).padStart(2, "0")).join("");
 const distanceMeters = (aLat: number, aLon: number, bLat: number, bLon: number) => {
   const rad = (v: number) => v * Math.PI / 180;
   const dLat = rad(bLat - aLat), dLon = rad(bLon - aLon);
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLon / 2) ** 2;
   return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
-const randomToken = () => {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-};
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const authHeader = req.headers.get("Authorization");
@@ -35,25 +29,19 @@ Deno.serve(async (req: Request) => {
   const { data: employee } = await admin.from("employees").select("id,organization_id,employee_number,full_name,role,active").eq("auth_user_id", authData.user.id).maybeSingle();
   if (!employee?.active) return json({ error: "Brukeren er ikke aktiv." }, 403);
   const { data: worksite } = await admin.from("worksites").select("id,name,address,latitude,longitude,radius_meters").eq("organization_id", employee.organization_id).eq("active", true).limit(1).maybeSingle();
-  if (!worksite?.latitude || !worksite?.longitude) return json({ error: "Arbeidsstedet mangler posisjon." }, 503);
+  if (!worksite || worksite.latitude == null || worksite.longitude == null || !Number.isFinite(Number(worksite.latitude)) || !Number.isFinite(Number(worksite.longitude)) || !Number.isFinite(Number(worksite.radius_meters)) || Number(worksite.radius_meters) <= 0) return json({ error: "Arbeidsstedet mangler posisjon." }, 503);
 
   if (req.method === "GET") {
     const since = new Date(Date.now() - 400 * 86400000).toISOString();
     const sinceDate = since.slice(0, 10);
-    const [{ data: openEntry }, { data: entries, error }, { data: adjustments }, { data: approvals }] = await Promise.all([
+    const [{ data: openEntry, error: statusError }, { data: entries, error }, { data: adjustments }, { data: approvals }] = await Promise.all([
       admin.from("time_entries").select("id,started_at,worksite_id").eq("employee_id", employee.id).is("ended_at", null).maybeSingle(),
       admin.from("time_entries").select("id,kind,started_at,ended_at,auto_clocked_out,source").eq("employee_id", employee.id).gte("started_at", since).order("started_at", { ascending: false }),
       admin.from("payroll_adjustments").select("work_date,category,hours,note").eq("employee_id", employee.id).gte("work_date", sinceDate).order("work_date", { ascending: false }),
       admin.from("month_approvals").select("month_start,status,approved_at").eq("employee_id", employee.id).gte("month_start", sinceDate.slice(0, 7) + "-01").order("month_start", { ascending: false }),
     ]);
-    if (error) return json({ error: error.message }, 400);
-    let qrStatus = null;
-    if (employee.role === "admin") {
-      const now = new Date().toISOString();
-      const { data: activeQr } = await admin.from("qr_codes").select("id,expires_at,created_at,location_check_required,reserve_code").eq("worksite_id", worksite.id).is("revoked_at", null).lte("valid_from", now).gt("expires_at", now).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      qrStatus = activeQr;
-    }
-    return json({ employee: { id: employee.id, name: employee.full_name }, worksite, open_entry: openEntry, entries: entries || [], adjustments: adjustments || [], approvals: approvals || [], qr_status: qrStatus });
+    if (error || statusError) return json({ error: "Timelisten kunne ikke hentes. Prøv igjen." }, 503);
+    return json({ employee: { id: employee.id, name: employee.full_name }, worksite, open_entry: openEntry, entries: entries || [], adjustments: adjustments || [], approvals: approvals || [] });
   }
 
   if (req.method !== "POST") return json({ error: "Handling støttes ikke." }, 405);
@@ -61,77 +49,41 @@ Deno.serve(async (req: Request) => {
   try { body = await req.json(); } catch { return json({ error: "Ugyldig forespørsel." }, 400); }
   const action = String(body.action || "");
 
+  // The poster is only a public shortcut. It grants no attendance permissions.
   if (action === "issue_qr") {
     if (employee.role !== "admin") return json({ error: "Kun administrator kan lage QR-kode." }, 403);
-    const token = randomToken();
-    let qrUrl: URL;
-    try {
-      qrUrl = new URL(String(body.base_url || ""));
-      const allowedHost = qrUrl.hostname === "tid.apartstavanger.no" || qrUrl.hostname.endsWith(".vercel.app");
-      if (qrUrl.protocol !== "https:" || !allowedHost || qrUrl.username || qrUrl.password) throw new Error("invalid URL");
-      qrUrl.search = "";
-      qrUrl.hash = "";
-      qrUrl.searchParams.set("qr", token);
-    } catch {
-      return json({ error: "Ugyldig nettadresse for QR-koden." }, 400);
-    }
-    const locationCheckRequired = !qrUrl.hostname.endsWith(".vercel.app");
-    const now = new Date(), expires = new Date(now);
-    expires.setUTCMonth(expires.getUTCMonth() + 6);
-    await admin.from("qr_codes").update({ revoked_at: now.toISOString() }).eq("worksite_id", worksite.id).is("revoked_at", null);
-    const { data: issuedQr, error } = await admin.from("qr_codes").insert({ worksite_id: worksite.id, token_hash: await sha256(token), valid_from: now.toISOString(), expires_at: expires.toISOString(), created_by: authData.user.id, location_check_required: locationCheckRequired }).select("reserve_code").single();
-    if (error) return json({ error: error.message }, 400);
-    const rawSvg = await QRCode.toString(qrUrl.toString(), { type: "svg", errorCorrectionLevel: "H", margin: 2, width: 420 });
-    const reserveLabel = issuedQr.reserve_code.replace(/(\d{4})(\d{4})/, "$1 $2");
-    const qrSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="490" viewBox="0 0 420 490"><rect width="420" height="490" fill="white"/>${rawSvg}<text x="210" y="445" text-anchor="middle" font-family="sans-serif" font-size="16">Reservekode (uten kamera)</text><text x="210" y="475" text-anchor="middle" font-family="sans-serif" font-size="26" font-weight="bold">${reserveLabel}</text></svg>`;
-    await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "issue_qr", entity_type: "worksite", entity_id: worksite.id, details: { expires_at: expires.toISOString(), location_check_required: locationCheckRequired } });
-    return json({ qr_svg: qrSvg, reserve_code: issuedQr.reserve_code, expires_at: expires.toISOString(), worksite: worksite.name, location_check_required: locationCheckRequired }, 201);
+    const qrUrl = "https://tid.apartstavanger.no/";
+    const qrSvg = await QRCode.toString(qrUrl, { type: "svg", errorCorrectionLevel: "H", margin: 2, width: 420 });
+    return json({ qr_svg: qrSvg, url: qrUrl, worksite: worksite.name }, 200);
   }
 
-  if (action === "revoke_qr") {
-    if (employee.role !== "admin") return json({ error: "Kun administrator kan sperre QR-koden." }, 403);
-    const now = new Date();
-    const { data: revoked, error } = await admin.from("qr_codes").update({ revoked_at: now.toISOString() }).eq("worksite_id", worksite.id).is("revoked_at", null).gt("expires_at", now.toISOString()).select("id");
-    if (error) return json({ error: error.message }, 400);
-    await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "revoke_qr", entity_type: "worksite", entity_id: worksite.id, details: { revoked_count: revoked?.length || 0 } });
-    return json({ revoked: revoked?.length || 0 });
-  }
-
-  if (action !== "clock_in" && action !== "clock_out") return json({ error: "Ugyldig handling." }, 400);
-  const latitude = Number(body.latitude), longitude = Number(body.longitude), accuracy = Number(body.accuracy);
-  const rawQr = String(body.qr_token || "").replace(/^APART-TID:/, "").trim();
-  const reserveCode = String(body.reserve_code || "").replace(/[\s-]/g, "");
-  if (body.latitude == null || body.longitude == null || !Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude)>90 || Math.abs(longitude)>180 || (!rawQr && !reserveCode)) return json({ error: "QR-kode eller reservekode og posisjon er påkrevd." }, 400);
-  if (reserveCode && !/^\d{8}$/.test(reserveCode)) return json({ error: "Reservekoden skal ha åtte sifre." }, 400);
-  const distance = distanceMeters(latitude, longitude, worksite.latitude, worksite.longitude);
+  if (!["clock_in", "clock_out", "check_position"].includes(action)) return json({ error: "Ugyldig handling." }, 400);
+  // Old cached clients must not auto-stamp when they open a QR link.
+  if (body.qr_token || body.reserve_code) return json({ error: "Stempling er forenklet. Oppdater Apart Tid og bruk knappen Stemple inn eller Stemple ut." }, 409);
+  const latitude = body.latitude, longitude = body.longitude, accuracy = body.accuracy;
+  if (typeof latitude !== "number" || typeof longitude !== "number" || !Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return json({ error: "Posisjonen mangler. Tillat posisjon for Apart Tid og prøv igjen." }, 400);
+  if (typeof accuracy !== "number" || !Number.isFinite(accuracy) || accuracy <= 0) return json({ error: "Enheten oppga ikke posisjonsnøyaktighet. Aktiver nøyaktig posisjon og prøv igjen." }, 403);
+  const positionTimestamp = body.position_timestamp;
+  if (typeof positionTimestamp !== "number" || !Number.isFinite(positionTimestamp) || Date.now() - positionTimestamp > 120000 || positionTimestamp - Date.now() > 30000) return json({ error: "Posisjonen er for gammel eller ugyldig. Prøv igjen for å hente en ny posisjon." }, 403);
+  const distance = distanceMeters(latitude, longitude, Number(worksite.latitude), Number(worksite.longitude));
+  if (accuracy > 100) return json({ error: `Vi klarer ikke å bekrefte hvor du er. Posisjonen er for unøyaktig (${Math.round(accuracy)} meter). Prøv nær et vindu eller kontakt administrator.`, accuracy_meters: Math.round(accuracy) }, 403);
+  if (distance > Number(worksite.radius_meters)) return json({ error: `Du må være på arbeidsstedet. Målt avstand er ${Math.round(distance)} meter; tillatt område er ${worksite.radius_meters} meter.`, distance_meters: Math.round(distance) }, 403);
+  if (action === "check_position") return json({ valid: true, distance_meters: Math.round(distance), accuracy_meters: Math.round(accuracy) });
   const now = new Date();
-  let qr: {id:string;location_check_required:boolean}|null = null;
-  if (reserveCode) {
-    const {data:result,error} = await admin.rpc("verify_qr_reserve", {p_employee_id:employee.id,p_worksite_id:worksite.id,p_code:reserveCode});
-    if(error)return json({error:"Reservekoden kunne ikke kontrolleres. Prøv igjen senere."},503);
-    if(result?.status==="limited")return json({error:`For mange feilforsøk. Prøv igjen om ${Math.ceil(result.retry_after/60)} minutter, eller skann QR-koden.`,retry_after:result.retry_after},429);
-    if(result?.status==="valid")qr={id:result.id,location_check_required:result.location_check_required};
-  } else {
-    const {data,error} = await admin.from("qr_codes").select("id,location_check_required").eq("worksite_id", worksite.id).eq("token_hash", await sha256(rawQr)).is("revoked_at", null).lte("valid_from", now.toISOString()).gt("expires_at", now.toISOString()).maybeSingle();
-    if(error)return json({error:"QR-koden kunne ikke kontrolleres. Prøv igjen senere."},503);
-    qr=data;
-  }
-  if (!qr) return json({ error: reserveCode ? "Reservekoden er ugyldig eller utløpt. Kontroller koden på arbeidsstedet." : "QR-koden er ugyldig eller utløpt." }, 403);
-  if (qr.location_check_required && (!Number.isFinite(accuracy) || accuracy <= 0)) return json({ error: "Telefonen oppga ikke tilstrekkelig posisjonsnøyaktighet. Prøv igjen med posisjon aktivert." }, 403);
-  if (qr.location_check_required && accuracy > 100) return json({ error: `Posisjonen er for unøyaktig (${Math.round(accuracy)} meter). Gå nærmere inngangen eller prøv igjen utendørs.`, accuracy_meters: Math.round(accuracy) }, 403);
-  if (qr.location_check_required && distance > worksite.radius_meters) return json({ error: `Du er ${Math.round(distance)} meter fra arbeidsstedet. Tillatt radius er ${worksite.radius_meters} meter.`, distance_meters: Math.round(distance) }, 403);
-  const { data: openEntry } = await admin.from("time_entries").select("id,started_at").eq("employee_id", employee.id).is("ended_at", null).maybeSingle();
+  const { data: openEntry, error: openError } = await admin.from("time_entries").select("id,started_at").eq("employee_id", employee.id).is("ended_at", null).maybeSingle();
+  if (openError) return json({ error: "Kunne ikke kontrollere stemplingsstatus. Prøv igjen." }, 503);
 
   if (action === "clock_in") {
     if (openEntry) return json({ error: "Du er allerede stemplet inn." }, 409);
-    const { data: entry, error } = await admin.from("time_entries").insert({ organization_id: employee.organization_id, employee_id: employee.id, worksite_id: worksite.id, kind: "work", started_at: now.toISOString(), clock_in_latitude: latitude, clock_in_longitude: longitude, source: "qr", created_by: authData.user.id }).select("id,started_at,ended_at").single();
+    const { data: entry, error } = await admin.from("time_entries").insert({ organization_id: employee.organization_id, employee_id: employee.id, worksite_id: worksite.id, kind: "work", started_at: now.toISOString(), clock_in_latitude: latitude, clock_in_longitude: longitude, source: "location", created_by: authData.user.id }).select("id,started_at,ended_at").single();
     if (error) return json({ error: error.message }, 409);
-    await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "clock_in", entity_type: "time_entry", entity_id: entry.id, details: { distance_meters: Math.round(distance), accuracy_meters: Number.isFinite(accuracy) ? Math.round(accuracy) : null, qr_id: qr.id, location_check_required: qr.location_check_required } });
+    await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "clock_in", entity_type: "time_entry", entity_id: entry.id, details: { distance_meters: Math.round(distance), accuracy_meters: Number.isFinite(accuracy) ? Math.round(accuracy) : null, method: "location", location_check_required: true } });
     return json({ entry, distance_meters: Math.round(distance) }, 201);
   }
-  if (!openEntry) return json({ error: "Du er ikke stemplet inn." }, 409);
-  const { data: entry, error } = await admin.from("time_entries").update({ ended_at: now.toISOString(), clock_out_latitude: latitude, clock_out_longitude: longitude, updated_at: now.toISOString() }).eq("id", openEntry.id).select("id,started_at,ended_at").single();
+  if (!openEntry || body.open_entry_id !== openEntry.id) return json({ error: "Stemplingsstatusen er endret. Oppdater siden før du prøver igjen." }, 409);
+  const { data: entry, error } = await admin.from("time_entries").update({ ended_at: now.toISOString(), clock_out_latitude: latitude, clock_out_longitude: longitude, updated_at: now.toISOString() }).eq("id", openEntry.id).is("ended_at", null).select("id,started_at,ended_at").maybeSingle();
   if (error) return json({ error: error.message }, 409);
-  await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "clock_out", entity_type: "time_entry", entity_id: entry.id, details: { distance_meters: Math.round(distance), accuracy_meters: Number.isFinite(accuracy) ? Math.round(accuracy) : null, qr_id: qr.id, location_check_required: qr.location_check_required } });
+  if (!entry) return json({ error: "Du er allerede stemplet ut. Oppdater siden." }, 409);
+  await admin.from("audit_logs").insert({ organization_id: employee.organization_id, actor_id: authData.user.id, action: "clock_out", entity_type: "time_entry", entity_id: entry.id, details: { distance_meters: Math.round(distance), accuracy_meters: Number.isFinite(accuracy) ? Math.round(accuracy) : null, method: "location", location_check_required: true } });
   return json({ entry, distance_meters: Math.round(distance) });
 });
