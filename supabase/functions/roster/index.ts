@@ -32,9 +32,9 @@ Deno.serve(async(req:Request)=>{
       admin.from("employees").select("id,employee_number,full_name,email").eq("organization_id",me.organization_id).eq("active",true).order("full_name"),
       schedule?admin.from("scheduled_shifts").select("id,employee_id,work_date,shift_type,start_time,end_time").eq("schedule_id",schedule.id).order("work_date").order("start_time"):Promise.resolve({data:[],error:null}),
       admin.from("vacation_requests").select("id,employee_id,request_type,start_date,end_date").eq("organization_id",me.organization_id).eq("status","approved").lte("start_date",addDays(week,6)).gte("end_date",week),
-      admin.from("sick_leave_requests").select("id,employee_id,absence_type,start_date,end_date,status").eq("organization_id",me.organization_id).neq("status","rejected").lte("start_date",addDays(week,6)).gte("end_date",week)
+      admin.from("sick_leave_requests").select("id,employee_id,absence_type,start_date,end_date,status,routine_version,employees(full_name)").eq("organization_id",me.organization_id).neq("status","rejected").lte("start_date",addDays(week,6)).gte("end_date",week)
     ]);if(settingsError||staffError||shiftError||vacationError||sickError)return json({error:settingsError?.message||staffError?.message||shiftError?.message||vacationError?.message||sickError?.message},400);
-    const absences=[...(vacations||[]),...(sickLeave||[]).map((x:any)=>({...x,request_type:"sick_leave"}))];
+    const absences=[...(vacations||[]),...(sickLeave||[]).map((x:any)=>({...x,employee_name:x.employees?.full_name,request_type:"sick_leave"}))];
     return json({week_start:week,schedule,settings:settings||{day_start:"08:00:00",day_end:"16:00:00",evening_start:"16:00:00",evening_end:"23:00:00",night_start:"23:00:00",night_end:"07:00:00"},employees:staff||[],shifts:shifts||[],absences});
   }
 
@@ -73,3 +73,4 @@ Deno.serve(async(req:Request)=>{
   }
   return json({error:"Handling støttes ikke."},405);
 });
+

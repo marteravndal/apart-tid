@@ -17,6 +17,13 @@ Deno.serve(async(req:Request)=>{
   const {data:authData,error:authError}=await admin.auth.getUser(auth.slice(7));if(authError||!authData.user)return json({error:"Ugyldig innlogging."},401);
   const {data:me}=await admin.from("employees").select("id,organization_id,role,active").eq("auth_user_id",authData.user.id).maybeSingle();if(!me?.active)return json({error:"Brukeren er ikke aktiv."},403);if(me.role!=="admin")return json({error:"Kun administrator har tilgang."},403);
   let body:Record<string,unknown>;try{body=await req.json()}catch{return json({error:"Ugyldig forespørsel."},400)}
+  if(body.action==="cancel_sick_leave"){
+    const id=String(body.id||""),reason=String(body.reason||"").trim();
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)||reason.length<3||reason.length>1000)return json({error:"Velg fravær og skriv en kort begrunnelse (3–1000 tegn)."},400);
+    const {data,error}=await admin.rpc("cancel_manual_sick_leave",{p_org:me.organization_id,p_actor:authData.user.id,p_request:id,p_reason:reason});
+    if(error)return json({error:error.code==="P0001"?error.message:"Fraværet kunne ikke slettes. Prøv igjen."},409);
+    return json(data);
+  }
   const employeeId=String(body.employee_id||""),type=String(body.absence_type||""),start=String(body.start_date||""),end=String(body.end_date||""),note=String(body.note||"").trim();
   if(!employeeId||![...sickTypes,...vacationTypes].includes(type)||!dateOk(start)||!dateOk(end)||end<start)return json({error:"Velg ansatt, fraværstype og en gyldig periode."},400);
   if(note.length>1000)return json({error:"Merknaden kan være maksimalt 1000 tegn."},400);
@@ -51,3 +58,4 @@ Deno.serve(async(req:Request)=>{
   await admin.from("audit_logs").insert({organization_id:me.organization_id,actor_id:authData.user.id,action:"admin_create_absence",entity_type:"vacation_request",entity_id:result.data.id,details:{employee_id:employeeId,absence_type:type,start_date:start,end_date:end,note:note||null,notification_sent:false,requested_days:requestedDays}});
   return json({absence:{...result.data,employee_id:employeeId,absence_type:type,start_date:start,end_date:end},notification_sent:false},201);
 });
+

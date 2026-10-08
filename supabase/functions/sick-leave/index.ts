@@ -18,8 +18,8 @@ Deno.serve(async(req:Request)=>{
 
   if(req.method==="GET"){
     const url=new URL(req.url),from=url.searchParams.get("from"),to=url.searchParams.get("to");
-    let query=admin.from("sick_leave_requests").select("id,employee_id,absence_type,start_date,end_date,status,routine_acknowledged_at,employee_note,admin_comment,handled_at,created_at,employees(employee_number,full_name,email)").eq("organization_id",me.organization_id).order("created_at",{ascending:false});
-    if(me.role!=="admin")query=query.eq("employee_id",me.id);else if(from&&to)query=query.lte("start_date",to).gte("end_date",from);
+    let query=admin.from("sick_leave_requests").select("id,employee_id,absence_type,start_date,end_date,status,routine_version,cancelled_at,cancellation_reason,routine_acknowledged_at,employee_note,admin_comment,handled_at,created_at,employees(employee_number,full_name,email)").eq("organization_id",me.organization_id).order("created_at",{ascending:false});
+    if(me.role!=="admin")query=query.eq("employee_id",me.id).is("cancelled_at",null);else if(from&&to)query=query.lte("start_date",to).gte("end_date",from);
     const {data:requests,error}=await query;if(error)return json({error:error.message},400);
     if(me.role!=="admin")return json({requests:requests||[],routine_version:routineVersion});
     const rangeFrom=from&&dateOk(from)?from:`${todayOslo().slice(0,4)}-01-01`,rangeTo=to&&dateOk(to)?to:todayOslo();
@@ -52,3 +52,4 @@ Deno.serve(async(req:Request)=>{
   }
   return json({error:"Handling støttes ikke."},405);
 });
+
