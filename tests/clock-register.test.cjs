@@ -14,7 +14,7 @@ function fixture(options={}){
     return{data:[{id:emp,full_name:'Test Employee',employee_number:'TEST',auth_user_id:'employee-user'},{id:'admin-employee',full_name:'Test Admin',auth_user_id:'admin-user'}]};
    }
    if(table==='month_locks')return{data:q.filters.some(x=>x[0]==='eq'&&x[1]==='month_start')?null:options.locked?[{month_start:'2026-10-01'}]:[],error:options.lockError?{message:'offline'}:null};
-   if(table==='month_approvals')return{data:[]};
+   if(table==='month_approvals'||table==='weekly_employee_locks'||table==='weekly_period_locks')return{data:[]};
    if(table==='time_entries')return{data:[{...entry,scheduled_shift_id:id}]};
    if(table==='clock_register')return{data:options.many?Array.from({length:51},(_,i)=>({...entry,id:'entry-'+i})):[{...entry,...options.entry}],error:options.readError?{message:'offline'}:null};
    if(table==='audit_logs')return{data:[{entity_id:id,action:'delete_time_entry',actor_id:'admin-user',created_at:'2026-10-07T06:00:00Z',details:{reason:'Mistake',before:{started_at:entry.started_at,ended_at:entry.ended_at,clock_in_latitude:59},private_secret:'not-for-client'}}]};
