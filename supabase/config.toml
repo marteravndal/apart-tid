@@ -1,0 +1,3 @@
+[functions.auto-clock-out]
+# This cron-only endpoint verifies its dedicated Vault credential in the handler.
+verify_jwt = false

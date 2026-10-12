@@ -1,0 +1,20 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const {stripTypeScriptTypes}=require('node:module');
+const source=stripTypeScriptTypes(fs.readFileSync('supabase/functions/auto-clock-out/index.ts','utf8').replace(/^import .*\n/,'').replace(/export /g,'').replace('Deno.serve(handleAutoClock);',''));
+const secret='a'.repeat(64),job={id:'job-1',recipient:'test@example.invalid',recipient_kind:'employee',lease_token:'lease',payload:{employee_name:'Test Ansatt',reference_no:42,started_at:'2026-10-24T20:00:00Z',ended_at:'2026-10-25T08:00:00Z',planned_shift:null}};
+let authorized=true,queue=[],fetchCalls=[],acks=[],replyStatus=200,throwNetwork=false;
+const admin={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:authorized?{id:true}:null,error:null})})})}),rpc:async(name,args)=>{if(name==='claim_auto_clock_notification')return {data:queue.splice(0,1),error:null};if(name==='finish_auto_clock_notification'){acks.push(args);return{data:true,error:null}}throw new Error(name)}};
+const sandbox={createClient:()=>admin,Deno:{env:{get:n=>n==='RESEND_API_KEY'?'synthetic-key':'synthetic'}},crypto:globalThis.crypto,TextEncoder,Uint8Array,Response,Request,AbortSignal,Date,Promise,setTimeout:fn=>fn(),fetch:async(url,options)=>{fetchCalls.push({url,options});if(throwNetwork)throw new Error('timeout');return new Response(JSON.stringify(replyStatus===200?{id:'mock-provider-id'}:{message:'failed'}),{status:replyStatus})}};
+vm.createContext(sandbox);vm.runInContext(source+'\nglobalThis.api={handleAutoClock,notificationEmail};',sandbox);
+const request=token=>new Request('https://example.invalid/worker',{method:'POST',headers:token?{'x-auto-clock-secret':token}:{}});
+(async()=>{
+ assert.equal((await sandbox.api.handleAutoClock(request())).status,401);assert.equal(fetchCalls.length,0);
+ authorized=false;assert.equal((await sandbox.api.handleAutoClock(request(secret))).status,401);assert.equal(fetchCalls.length,0);authorized=true;
+ queue=[job];let response=await sandbox.api.handleAutoClock(request(secret));assert.equal(response.status,200);assert.equal(acks.at(-1).p_provider_id,'mock-provider-id');
+ let email=JSON.parse(fetchCalls[0].options.body);assert.deepEqual(email.to,['test@example.invalid']);assert.match(email.text,/ST-000042/);assert.match(email.text,/24.10.2026, 22:00/);assert.match(email.text,/25.10.2026, 09:00/);assert.match(email.text,/Arbeid som faktisk er utført/);assert.match(email.text,/fortsatt er på jobb/);assert.equal(fetchCalls[0].options.headers['Idempotency-Key'],'auto-clock-out/job-1');
+ replyStatus=429;queue=[job];await sandbox.api.handleAutoClock(request(secret));assert.equal(acks.at(-1).p_provider_id,null);assert.equal(acks.at(-1).p_permanent,false);assert.equal(fetchCalls.at(-1).options.body,fetchCalls[0].options.body);
+ throwNetwork=true;queue=[job];await sandbox.api.handleAutoClock(request(secret));assert.equal(acks.at(-1).p_provider_id,null);throwNetwork=false;
+ replyStatus=422;queue=[job];await sandbox.api.handleAutoClock(request(secret));assert.equal(acks.at(-1).p_permanent,true);
+ const adminEmail=sandbox.api.notificationEmail({...job,recipient_kind:'admin',recipient:'post@apartstavanger.no'});assert.match(adminEmail.text,/Kontroller faktisk arbeidstid/);assert.match(adminEmail.subject,/Automatisk utstemplet/);
+ console.log('PASS: worker authorization, employee/admin mail, Oslo DST, idempotent retry, 429, timeout and permanent rejection.');
+})().catch(e=>{console.error(e);process.exitCode=1});
