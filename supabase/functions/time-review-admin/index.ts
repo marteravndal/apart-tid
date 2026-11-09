@@ -1,8 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
+import { loadRosterAttendance } from "../_shared/roster-attendance.ts";
 import { premiumHoursBetween } from "../_shared/payroll-premiums.ts";
 
-const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS","Content-Type":"application/json"};
+const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS","Content-Type":"application/json","Cache-Control":"no-store"};
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:cors});
 const monthPattern=/^\d{4}-(0[1-9]|1[0-2])$/;
 const osloDate=(value:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Oslo"}).format(new Date(value));
@@ -32,8 +33,8 @@ Deno.serve(async(req:Request)=>{
   if(body.action==="roster_attendance"){
     const ids=body.shift_ids;if(!Array.isArray(ids)||ids.length>250||ids.some(x=>typeof x!=="string"||!/^[0-9a-f-]{36}$/i.test(x)))return json({error:"Ugyldig vaktliste."},400);
     if(!ids.length)return json({entries:[]});
-    const {data,error}=await admin.from("time_entries").select("id,reference_no,scheduled_shift_id,kind,started_at,ended_at").eq("organization_id",me.organization_id).in("scheduled_shift_id",ids);
-    if(error)return json({error:"Kunne ikke kontrollere etterregistrerte vakter."},503);return json({entries:data||[]});
+    try{return json({entries:await loadRosterAttendance(admin,me.organization_id,ids)})}
+    catch{return json({error:"Kunne ikke kontrollere stemplingene. Oppdater vaktlisten og prøv igjen."},503)}
   }
   if(body.action==="delete"){
     const entryId=String(body.entry_id||""),reason=String(body.reason||"").trim();

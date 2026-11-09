@@ -107,3 +107,10 @@ textarea{width:100%;border:1px solid var(--line);border-radius:11px;padding:12px
 .published-cost-basis{margin-top:16px;font-size:12px;line-height:1.6}
 .published-cost-basis summary{cursor:pointer;font-weight:700}
 @media(max-width:600px){.published-cost-panel{padding:18px}.published-cost-cards{grid-template-columns:minmax(0,1fr)}}
+
+.roster-stamped{display:block;min-height:0;max-height:58px;overflow-y:auto;line-height:1.25}
+.roster-stamped>span{display:block}
+.roster-stamped .roster-stamp-references{display:flex;flex-wrap:wrap;gap:2px 5px}
+.roster-shift .roster-stamp-reference{background:transparent;border:0;border-radius:0;padding:1px 0;font:inherit;color:inherit;text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+.roster-stamp-reference:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.roster-stamp-attention{color:#864515}
