@@ -294,7 +294,7 @@ async function handleContractListClick(event){const edit=event.target.closest('[
 $('#adminHrContracts').onclick=handleContractListClick;$('#employeeHrContracts').onclick=handleContractListClick;
 resetContractForm();
 
-async function loadDashboard(){if(!dashboardDate)dashboardDate=localDate();const week=rosterMonday(dashboardDate);[dashboardData,dashboardRosterData]=await Promise.all([authenticated(`/functions/v1/admin-dashboard?date=${dashboardDate}`),authenticated(`/functions/v1/roster?week=${week}`)]);renderDashboard();if(typeof loadPayrollDashboard==='function')loadPayrollDashboard();if(typeof loadControlAssistant==='function')loadControlAssistant()}
+async function loadDashboard(){if(!dashboardDate)dashboardDate=localDate();const week=rosterMonday(dashboardDate);[dashboardData,dashboardRosterData]=await Promise.all([authenticated(`/functions/v1/admin-dashboard?date=${dashboardDate}`),authenticated(`/functions/v1/roster?week=${week}`)]);renderDashboard();if(typeof loadPublishedCostDashboard==='function')loadPublishedCostDashboard();if(typeof loadPayrollDashboard==='function')loadPayrollDashboard();if(typeof loadControlAssistant==='function')loadControlAssistant()}
 function dashboardDateText(value){return new Date(`${value}T12:00:00`).toLocaleDateString('nb-NO',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
 function dashboardAddDays(value,days){const date=new Date(`${value}T12:00:00`);date.setDate(date.getDate()+days);return date.toISOString().slice(0,10)}
 function dashboardInitials(value){return String(value||'').split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase()}

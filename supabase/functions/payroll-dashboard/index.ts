@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { payrollForecast } from "../_shared/payroll-forecast.ts";
+import { loadPublishedCosts } from "../_shared/published-costs.ts";
 const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS","Content-Type":"application/json","Cache-Control":"no-store"};
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:cors});
 Deno.serve(async(req:Request)=>{
@@ -14,6 +15,11 @@ Deno.serve(async(req:Request)=>{
  let body:any;try{body=await req.json()}catch{return json({error:'Ugyldig forespørsel.'},400)}
  const action=body.action||'load',month=String(body.month||'');
  const validDate=(s:string)=>/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;
+ if(action==='published_costs'){
+  const date=String(body.date||'');
+  if(!validDate(date)||date<'2000-01-01'||date>'2100-12-31')return json({error:'Velg en gyldig dato.'},400);
+  return json(await loadPublishedCosts(admin,me.organization_id,date));
+ }
  if(!validDate(month)||!month.endsWith('-01')||!['load','planning','complete_day'].includes(action))return json({error:'Velg en gyldig måned og handling.'},400);
  if(action!=='load'&&(!validDate(body.date)||action==='complete_day'&&(typeof body.complete!=='boolean'||typeof body.expected!=='string')))return json({error:'Ugyldig planleggingsstatus.'},400);
  const {data,error}=await admin.rpc('payroll_dashboard',{p_org:me.organization_id,p_actor:user.user.id,p_month:month,p_action:action,p_body:body});

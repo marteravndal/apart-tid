@@ -1,6 +1,6 @@
-const CACHE_NAME='apart-tid-shell-v21';
+const CACHE_NAME='apart-tid-shell-v22';
 const OFFLINE_URL='/offline';
-const APP_SHELL=[OFFLINE_URL,'/styles.css','/app.js','/weekly-review.js','/payroll-dashboard.js','/control-assistant.js','/manifest.webmanifest','/admin-app','/admin-app.css','/admin-app.js','/admin-manifest.webmanifest','/icons/apart-tid-192.png','/icons/apart-tid-512.png','/icons/apart-tid-maskable-512.png'];
+const APP_SHELL=[OFFLINE_URL,'/styles.css','/app.js','/weekly-review.js','/payroll-dashboard.js','/published-costs.js','/control-assistant.js','/manifest.webmanifest','/admin-app','/admin-app.css','/admin-app.js','/admin-manifest.webmanifest','/icons/apart-tid-192.png','/icons/apart-tid-512.png','/icons/apart-tid-maskable-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)));
