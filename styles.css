@@ -114,3 +114,8 @@ textarea{width:100%;border:1px solid var(--line);border-radius:11px;padding:12px
 .roster-shift .roster-stamp-reference{background:transparent;border:0;border-radius:0;padding:1px 0;font:inherit;color:inherit;text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
 .roster-stamp-reference:focus-visible{outline:2px solid var(--green);outline-offset:2px}
 .roster-stamp-attention{color:#864515}
+
+/* Custom shifts keep equal row heights across the entire week. */
+.roster-shift-group.custom-group{min-height:var(--custom-shift-height,160px)}
+.roster-shift.custom,.admin-day-shift.custom{background:#edf4f1;border-left-color:#467c70}
+.roster-shift-error{color:#9c3326;overflow-wrap:anywhere}.roster-shift-error:empty{display:none}
