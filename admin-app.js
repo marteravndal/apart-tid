@@ -23,7 +23,7 @@ function dateText(value){return new Date(`${value}T12:00:00Z`).toLocaleDateStrin
 function rosterMinutes(value){const[hour,minute]=String(value||'').slice(0,5).split(':').map(Number);return hour*60+minute}
 function rosterTime(value){return String(value||'').slice(0,5).replace(':','.')}
 function crossesMidnight(shift){return rosterMinutes(shift.end_time)<=rosterMinutes(shift.start_time)}
-function shiftLabel(shift){if(shift.shift_type==='custom')return'Egendefinert skift';if(shift.shift_type==='day')return'Dagskift';if(shift.shift_type==='evening')return'Kveldsskift';return rosterMinutes(shift.start_time)>=720?'Nattskift 1':'Nattskift 2'}
+function shiftLabel(shift){if(shift.shift_type==='custom')return'Egendefinert skift';if(shift.shift_type==='day')return'Dagskift';if(shift.shift_type==='evening')return'Kveldsskift';return rosterMinutes(shift.start_time)<720||String(shift.start_time).slice(0,5)==='23:45'?'Nattskift 2':'Nattskift 1'}
 function shiftInterval(shift){const base=new Date(`${shift.work_date}T00:00:00Z`).getTime(),start=base+rosterMinutes(shift.start_time)*60000;let end=base+rosterMinutes(shift.end_time)*60000;if(end<=start)end+=86400000;return[start,end]}
 function absenceLabel(absence){return absence.request_type==='sick_leave'?'Sykefravær':absence.request_type==='vacation'?'Ferie':'Permisjon'}
 

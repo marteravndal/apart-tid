@@ -333,7 +333,7 @@ $('#openCourses').onclick=async()=>{try{await loadCourses();markEmployeeSection(
 $('#courseTestForm').onsubmit=async event=>{event.preventDefault();const button=event.submitter,questions=activeCourseAssignment.courses.questions||[],answers=questions.map(q=>({question_id:q.id,option_index:Number(new FormData(event.target).get(`question-${q.id}`))}));button.disabled=true;button.textContent='Kontrollerer …';try{const data=await authenticated('/functions/v1/courses',{method:'POST',body:{action:'submit',assignment_id:activeCourseAssignment.id,answers}});show(data.passed?`Bestått med ${data.score} %. Kurset er fullført. ${data.diploma_ready?'Diplomet er lagret i dokumentarkivet.':'Diplomet klargjøres. Du kan hente det under fullførte kurs.'}`:`Du fikk ${data.score} %. Du må ha ${data.passing_score} % for å bestå.`);await loadCourses();$('#courseReaderDialog').close()}catch(error){show(error.message)}finally{button.disabled=false;button.textContent='Lever svar'}};
 
 const rosterTypes={day:'Dagskift',evening:'Kveldsskift',night:'Nattskift',custom:'Egendefinert skift'};
-const rosterNightPresets={night1:{label:'Nattskift 1',start:'23:00',end:'07:00'},night2:{label:'Nattskift 2',start:'00:00',end:'06:00'}};
+const rosterNightPresets={night1:{label:'Nattskift 1',start:'23:00',end:'07:00'},night2:{label:'Nattskift 2',start:'23:45',end:'06:00'}};
 function rosterIso(date){return date.toISOString().slice(0,10)}
 function rosterMonday(value=new Date()){const d=value instanceof Date?new Date(value):new Date(`${value}T12:00:00`),day=d.getDay()||7;d.setDate(d.getDate()-day+1);return rosterIso(d)}
 function rosterAddDays(value,days){const d=new Date(`${value}T12:00:00`);d.setDate(d.getDate()+days);return rosterIso(d)}
@@ -346,7 +346,8 @@ function rosterCrossesMidnight(shift){return rosterMinutes(shift.end_time)<=rost
 function rosterDuration(shift){let value=rosterMinutes(shift.end_time)-rosterMinutes(shift.start_time);if(value<=0)value+=1440;return value/60}
 function rosterPremiumSegment(date,start,end){const day=new Date(`${date}T12:00:00Z`).getUTCDay(),overlap=(from,to)=>Math.max(0,Math.min(end,to)-Math.max(start,from))/60;return{evening:day>=1&&day<=5?overlap(1260,1440):0,night:overlap(0,360),weekend:day===6?overlap(1080,1440):day===0?overlap(360,1440):0}}
 function rosterPremiumHours(shift){const start=rosterMinutes(shift.start_time),end=rosterMinutes(shift.end_time),segments=rosterCrossesMidnight(shift)?[[shift.work_date,start,1440],[rosterAddDays(shift.work_date,1),0,end]]:[[shift.work_date,start,end]];return segments.reduce((sum,[date,from,to])=>{const value=rosterPremiumSegment(date,from,to);return{evening:sum.evening+value.evening,night:sum.night+value.night,weekend:sum.weekend+value.weekend}},{evening:0,night:0,weekend:0})}
-function rosterNightSlot(shift){return rosterMinutes(shift.start_time)>=12*60?'night1':'night2'}
+// Keep legacy midnight shifts in row 2; new row-2 shifts start at 23:45. Stored times are never rewritten.
+function rosterNightSlot(shift){return rosterMinutes(shift.start_time)<12*60||String(shift.start_time).slice(0,5)==='23:45'?'night2':'night1'}
 function rosterShiftLabel(shift){return shift.shift_type==='night'?rosterNightPresets[rosterNightSlot(shift)].label:rosterTypes[shift.shift_type]}
 function rosterMoney(value){return Number(value||0).toLocaleString('nb-NO',{style:'currency',currency:'NOK',minimumFractionDigits:0,maximumFractionDigits:0})}
 function rosterWeeklyCapacity(employee){const percent=Number(employee.position_percent);return Number.isFinite(percent)&&percent>0?165*12/52*percent/100:null}
